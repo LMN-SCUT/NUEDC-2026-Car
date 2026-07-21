@@ -21,6 +21,12 @@ DebugConfig/
 *.lst
 *.d
 *.dep
+*.crf
+*.lnp
+*.build_log.htm
+*.htm
+*.uvoptx
+*.sct
 
 # Python/K230 caches
 __pycache__/
@@ -53,4 +59,3 @@ Thumbs.db
 .env.*
 secrets.*
 credentials.*
-

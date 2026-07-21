@@ -65,6 +65,10 @@ void vl_hal_process(vl_hal_link_t *link, uint32_t now_ms) {
                 && vl_decode_observation(&frame, &link->latest_observation)) {
                 link->last_observation_ms = now_ms;
                 link->observation_ready = 1u;
+            } else if (frame.type == VL_TYPE_ACK
+                       && vl_decode_ack(&frame, &link->latest_ack)) {
+                link->last_ack_ms = now_ms;
+                link->ack_ready = 1u;
             }
         } else if (result == VL_PARSE_BAD_CRC) {
             link->crc_error_count++;
@@ -81,6 +85,29 @@ int vl_hal_take_observation(vl_hal_link_t *link, vl_observation_t *out) {
     *out = link->latest_observation;
     link->observation_ready = 0u;
     return 1;
+}
+
+int vl_hal_take_ack(vl_hal_link_t *link, vl_ack_t *out) {
+    if (link == NULL || out == NULL || link->ack_ready == 0u) {
+        return 0;
+    }
+    *out = link->latest_ack;
+    link->ack_ready = 0u;
+    return 1;
+}
+
+HAL_StatusTypeDef vl_hal_send_command(vl_hal_link_t *link, uint8_t seq,
+                                      const vl_command_t *command) {
+    uint8_t frame[VL_MAX_FRAME_SIZE];
+    size_t length;
+    if (link == NULL || link->uart == NULL || command == NULL) {
+        return HAL_ERROR;
+    }
+    length = vl_pack_command(seq, command, frame, sizeof(frame));
+    if (length == 0u) {
+        return HAL_ERROR;
+    }
+    return HAL_UART_Transmit(link->uart, frame, (uint16_t)length, 20u);
 }
 
 int vl_hal_observation_is_fresh(const vl_hal_link_t *link, uint32_t now_ms,
