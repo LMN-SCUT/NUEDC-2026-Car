@@ -1,0 +1,56 @@
+# IDE and editor
+.vscode/
+.idea/
+*.user
+*.suo
+*.uvguix.*
+
+# Build outputs
+build/
+out/
+Objects/
+Listings/
+DebugConfig/
+*.o
+*.obj
+*.elf
+*.axf
+*.hex
+*.bin
+*.map
+*.lst
+*.d
+*.dep
+
+# Python/K230 caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+*.swp
+Thumbs.db
+.DS_Store
+
+# Large archives, installers, and raw firmware packages
+*.zip
+*.rar
+*.7z
+*.tar
+*.gz
+*.xz
+*.exe
+*.msi
+*.pack
+
+# Secrets and local configuration
+.env
+.env.*
+secrets.*
+credentials.*
+
