@@ -1,6 +1,10 @@
 # IDE and editor
 .vscode/
 .idea/
+**/.codex/
+**/.theia/
+**/.clangd/
+**/.clangd
 *.user
 *.suo
 *.uvguix.*
@@ -11,6 +15,7 @@ out/
 Objects/
 Listings/
 DebugConfig/
+Debug/
 *.o
 *.obj
 *.elf
@@ -25,6 +30,7 @@ DebugConfig/
 *.lnp
 *.build_log.htm
 *.htm
+*.html
 *.uvoptx
 *.sct
 

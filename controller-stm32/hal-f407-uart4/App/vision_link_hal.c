@@ -49,7 +49,8 @@ void vl_hal_process(vl_hal_link_t *link, uint32_t now_ms) {
     }
 
     if (link->parser.state != VL_WAIT_SOF1
-        && (uint32_t)(now_ms - link->last_byte_ms) > 20u) {
+        && (uint32_t)(now_ms - link->last_byte_ms)
+               > VL_HAL_PARSER_TIMEOUT_MS) {
         vl_parser_timeout(&link->parser);
         link->format_error_count++;
     }
@@ -61,6 +62,7 @@ void vl_hal_process(vl_hal_link_t *link, uint32_t now_ms) {
         result = vl_parser_push_byte(&link->parser, byte, &frame);
         if (result == VL_PARSE_FRAME) {
             link->valid_frame_count++;
+            link->last_valid_frame_ms = now_ms;
             if (frame.type == VL_TYPE_VISION_OBSERVATION
                 && vl_decode_observation(&frame, &link->latest_observation)) {
                 link->last_observation_ms = now_ms;
@@ -119,4 +121,12 @@ int vl_hal_observation_is_fresh(const vl_hal_link_t *link, uint32_t now_ms,
         return 0;
     }
     return (uint32_t)(now_ms - link->last_observation_ms) <= timeout_ms;
+}
+
+int vl_hal_link_is_alive(const vl_hal_link_t *link, uint32_t now_ms,
+                         uint32_t timeout_ms) {
+    if (link == NULL || link->valid_frame_count == 0u) {
+        return 0;
+    }
+    return (uint32_t)(now_ms - link->last_valid_frame_ms) <= timeout_ms;
 }

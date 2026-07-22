@@ -5,6 +5,9 @@
 #include "vision_link.h"
 
 #define VL_HAL_RX_RING_SIZE 256u
+#define VL_HAL_PARSER_TIMEOUT_MS 20u
+#define VL_HAL_OBSERVATION_STALE_MS 150u
+#define VL_HAL_LINK_LOSS_MS 500u
 
 typedef struct {
     UART_HandleTypeDef *uart;
@@ -20,6 +23,7 @@ typedef struct {
     uint32_t last_byte_ms;
     uint32_t last_observation_ms;
     uint32_t last_ack_ms;
+    uint32_t last_valid_frame_ms;
     uint32_t valid_frame_count;
     uint32_t crc_error_count;
     uint32_t format_error_count;
@@ -37,5 +41,7 @@ HAL_StatusTypeDef vl_hal_send_command(vl_hal_link_t *link, uint8_t seq,
                                       const vl_command_t *command);
 int vl_hal_observation_is_fresh(const vl_hal_link_t *link, uint32_t now_ms,
                                 uint32_t timeout_ms);
+int vl_hal_link_is_alive(const vl_hal_link_t *link, uint32_t now_ms,
+                         uint32_t timeout_ms);
 
 #endif
