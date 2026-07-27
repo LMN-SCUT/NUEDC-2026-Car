@@ -40,6 +40,19 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+.ultralytics/
+Ultralytics/
+
+# Local YOLO training workspace (selected baselines are force-added explicitly)
+runs/
+train_data/*
+!train_data/README.md
+!train_data/luanch.cmd
+!train_data/yolo_k230_gui.py
+yolo11n.pt
+yolov8n.pt
+vision-k230/models/write_test/
+vision-k230/models/steel-ball-v6-320/
 
 # Logs and temporary files
 *.log
