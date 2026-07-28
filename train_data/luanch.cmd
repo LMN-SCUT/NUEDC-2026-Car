@@ -1,0 +1,1 @@
+D:\anacodaprogram\envs\py38_202530350942\vision\python.exe "D:\DCCC\05_CODE\NUEDC-2026-Car\train_data\yolo_k230_gui.py"

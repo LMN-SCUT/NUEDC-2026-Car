@@ -1,6 +1,10 @@
 # IDE and editor
 .vscode/
 .idea/
+**/.codex/
+**/.theia/
+**/.clangd/
+**/.clangd
 *.user
 *.suo
 *.uvguix.*
@@ -11,6 +15,7 @@ out/
 Objects/
 Listings/
 DebugConfig/
+Debug/
 *.o
 *.obj
 *.elf
@@ -25,8 +30,13 @@ DebugConfig/
 *.lnp
 *.build_log.htm
 *.htm
+*.html
 *.uvoptx
 *.sct
+
+# HC-05 STM32 projects reuse the tracked F407 HAL/CMSIS tree.
+wireless-hc05-test/stm32-hc05-node/Drivers/
+wireless-hc05-test/stm32-hc05-uart-bridge/Drivers/
 
 # Python/K230 caches
 __pycache__/
@@ -34,6 +44,19 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+.ultralytics/
+Ultralytics/
+
+# Local YOLO training workspace (selected baselines are force-added explicitly)
+runs/
+train_data/*
+!train_data/README.md
+!train_data/luanch.cmd
+!train_data/yolo_k230_gui.py
+yolo11n.pt
+yolov8n.pt
+vision-k230/models/write_test/
+vision-k230/models/steel-ball-v6-320/
 
 # Logs and temporary files
 *.log

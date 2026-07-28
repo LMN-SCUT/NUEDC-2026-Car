@@ -36,3 +36,38 @@ K230 只负责图像采集、目标识别和观测结果输出，不直接执行
 - `../shared/protocol/python/vision_link.py`
 
 运行 `uart_protocol_smoke.py` 后会以 30 Hz 发送模拟视觉观测、以 2 Hz 发送心跳，并接收主控的模式、启停和参考点命令。当前沿用历史配置 `UART3、TX=32、RX=33`，上板前必须根据实际 K230 型号核对引脚复用。
+
+## YOLOv8 目标检测基线
+
+`examples/yolov8_object_detection_lcd.py` 是从已通过实机验证的亚博智能
+YOLOv8n 例程中整理出的干净版本，保留摄像头、KPU 推理、后处理和 LCD
+显示，移除了厂商私有的 `YbUart/YbProtocol`，暂不掺入比赛通信逻辑。
+
+运行条件：
+
+- 使用亚博智能 CanMV K230 固件配套的 `/sdcard/libs/`。
+- 模型位于 `/sdcard/kmodel/yolov8n_224.kmodel`。
+- 从 CanMV IDE 手动打开并运行脚本。
+- 验证阶段不要保存为 `/sdcard/main.py`，避免上电自启程序与 IDE 抢占摄像头。
+
+预期现象：摄像头和 LCD 正常启动，画面中的 COCO 类别目标出现检测框、类别名
+和置信度。停止脚本时会主动释放模型、摄像头和显示资源。该脚本只用于确认
+YOLO 链路和性能基线；正式赛题应另建业务入口，并复用统一 `protocol-v1`，不要
+恢复厂商私有串口协议。
+
+## 自定义 bluebox 模型状态（2026-07-23）
+
+- PC 端 640×640 训练已经完成，最佳权重位于 `../runs/bluebox_v1/weights/best.pt`。
+- 当前已验证的 K230 亚博例程使用 224×224 输入，不能直接把 640 权重文件复制到 SD 卡运行。
+- 部署路线为：从 640 最佳权重微调 224 模型，导出 ONNX，再经 nncase/K230 工具链转换为 `.kmodel`。
+- 数据、训练命令、指标和已知误检统一记录在 `../train_data/README_bluebox_training.md`，不再新建重复说明文档。
+- 自定义模型部署时保留现有 COCO 基线脚本，另设单类别 `bluebox` 入口，避免破坏已经验证成功的原厂模型链路。
+
+## 钢球检测封存基线 V6-320（2026-07-27）
+
+- K230 运行脚本：`examples/yolov8_object_detection_lcd_bluebox .py`。
+- 部署模型：`models/steel_ball_v6_320.kmodel`，输入尺寸为 `320×320`。
+- 默认置信度阈值为 `0.15`，NMS 阈值为 `0.40`。
+- V6 相比 V5 显著改善远距离、贴黑线和强高光钢球识别。
+- 已知现象：圆形插头横向相对运动时，低置信度下可能偶发闪框；静止、前后移动和滚动钢球识别稳定。当前不作为阻塞问题，正式控制逻辑应增加多帧确认。
+- 完整训练参数、指标、校验值和困难集结果见 `models/STEEL_BALL_V6_320.md`。

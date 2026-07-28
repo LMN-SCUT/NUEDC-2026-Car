@@ -1,7 +1,9 @@
 """K230 -> F407 protocol-v1 one-file UART smoke test.
 
 Run this file directly in CanMV IDE. No extra Python module is required.
-It sends synthetic valid observations at 30 Hz and heartbeat at 2 Hz.
+It sends synthetic observations at 30 Hz and heartbeat at 2 Hz. When fault
+injection is enabled, it performs one malformed-stream test and then resumes
+normal traffic automatically.
 """
 
 import math
@@ -20,6 +22,11 @@ UART_ID = 3
 TX_PIN = 32
 RX_PIN = 33
 BAUD = 115200
+
+# One-shot parser recovery test. Set to False after acceptance testing.
+FAULT_INJECTION_ENABLED = False
+FAULT_START_DELAY_MS = 3000
+FAULT_STEP_INTERVAL_MS = 1000
 
 SOF1 = 0xAA
 SOF2 = 0x55
@@ -88,8 +95,8 @@ def pack_observation(seq, timestamp_ms, center_x, center_y, error_x, error_y, mo
         error_y,
         90,
         FLAG_TARGET_VALID | FLAG_RESULT_STABLE,
-        mode,
         0,
+        mode,
     )
     return pack_frame(TYPE_VISION_OBSERVATION, seq, payload)
 
@@ -102,6 +109,35 @@ def pack_heartbeat(seq, timestamp_ms):
 def pack_ack(seq, request_seq, status, detail=0):
     payload = bytes((TYPE_COMMAND, request_seq & 0xFF, status & 0xFF, detail & 0xFF))
     return pack_frame(TYPE_ACK, seq, payload)
+
+
+def inject_fault_step(uart_device, step, seq_value, now_ms, current_mode):
+    """Inject one controlled stream fault and return the next sequence value."""
+    if step == 0:
+        # Includes a lone 0xAA to exercise SOF resynchronization.
+        uart_device.write(bytes((0x00, 0xFF, 0x12, SOF1, 0x33, 0x7E)))
+        print("[VL][FAULT] 1/4 noise bytes injected")
+    elif step == 1:
+        frame = pack_heartbeat(seq_value, now_ms)
+        uart_device.write(frame[:-1] + bytes((frame[-1] ^ 0x5A,)))
+        seq_value = (seq_value + 1) & 0xFF
+        print("[VL][FAULT] 2/4 bad CRC frame injected")
+    elif step == 2:
+        # A length of 65 exceeds protocol-v1's 64-byte payload limit.
+        uart_device.write(bytes((SOF1, SOF2, VERSION, TYPE_HEARTBEAT,
+                                 seq_value, 65)))
+        seq_value = (seq_value + 1) & 0xFF
+        print("[VL][FAULT] 3/4 invalid length header injected")
+    elif step == 3:
+        frame = pack_observation(
+            seq_value, now_ms, 320, 240, 0, 0, current_mode
+        )
+        uart_device.write(frame[:10])
+        seq_value = (seq_value + 1) & 0xFF
+        print("[VL][FAULT] 4/4 truncated frame injected; pausing 30 ms")
+        sleep_ms(30)
+        print("[VL][FAULT] sequence complete; normal traffic resumed")
+    return seq_value
 
 
 def decode_command(payload):
@@ -182,6 +218,9 @@ last_ack_frame = None
 last_observation_ms = ticks_ms()
 last_heartbeat_ms = last_observation_ms
 last_print_ms = last_observation_ms
+fault_start_ms = last_observation_ms
+last_fault_ms = last_observation_ms
+fault_step = 0
 
 print("[VL] standalone smoke sender")
 print("[VL] UART{} TX=GPIO{} RX=GPIO{} {} 8N1".format(
@@ -190,6 +229,13 @@ print("[VL] UART{} TX=GPIO{} RX=GPIO{} {} 8N1".format(
 
 while True:
     now = ticks_ms()
+
+    if (FAULT_INJECTION_ENABLED and fault_step < 4 and
+            ticks_diff(now, fault_start_ms) >= FAULT_START_DELAY_MS and
+            ticks_diff(now, last_fault_ms) >= FAULT_STEP_INTERVAL_MS):
+        seq = inject_fault_step(uart, fault_step, seq, now, mode)
+        fault_step += 1
+        last_fault_ms = now
 
     if stream_enabled and ticks_diff(now, last_observation_ms) >= 33:
         phase = now / 1000.0
