@@ -34,6 +34,10 @@ Debug/
 *.uvoptx
 *.sct
 
+# HC-05 STM32 projects reuse the tracked F407 HAL/CMSIS tree.
+wireless-hc05-test/stm32-hc05-node/Drivers/
+wireless-hc05-test/stm32-hc05-uart-bridge/Drivers/
+
 # Python/K230 caches
 __pycache__/
 *.py[cod]

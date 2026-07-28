@@ -1,0 +1,28 @@
+//@cliArgs --device "MSPM0G350X" --package "LQFP-64(PM)" --part "Default"
+//@v2CliArgs --device "MSPM0G3507" --package "LQFP-64(PM)"
+// @cliArgs --board /ti/boards/LP_MSPM0G3507 --rtos nortos
+
+const GPIO = scripting.addModule("/ti/driverlib/GPIO", {}, false);
+const GPIO1 = GPIO.addInstance();
+const UART = scripting.addModule("/ti/driverlib/UART", {}, false);
+const UART1 = UART.addInstance();
+const SYSCTL = scripting.addModule("/ti/driverlib/SYSCTL");
+
+GPIO1.$name = "GPIO_LED";
+GPIO1.port = "PORTB";
+GPIO1.associatedPins.create(1);
+GPIO1.associatedPins[0].$name = "D1";
+GPIO1.associatedPins[0].pin.$assign = "PB14";
+
+UART1.$name = "UART_HC05";
+UART1.profile = "CONFIG_PROFILE_1";
+UART1.peripheral.$assign = "UART1";
+UART1.targetBaudRate = 38400;
+UART1.enabledInterrupts = ["RX"];
+UART1.enableFIFO = false;
+UART1.enableInternalLoopback = false;
+UART1.peripheral.txPin.$assign = "PA8";
+UART1.peripheral.rxPin.$assign = "PA9";
+
+SYSCTL.forceDefaultClkConfig = true;
+SYSCTL.clockTreeEn = true;

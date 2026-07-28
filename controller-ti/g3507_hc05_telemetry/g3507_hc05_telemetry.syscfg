@@ -1,0 +1,86 @@
+//@cliArgs --device "MSPM0G350X" --package "LQFP-64(PM)" --part "Default"
+//@v2CliArgs --device "MSPM0G3507" --package "LQFP-64(PM)"
+// @cliArgs --board /ti/boards/LP_MSPM0G3507 --rtos nortos
+
+const GPIO   = scripting.addModule("/ti/driverlib/GPIO", {}, false);
+const GPIOA1 = GPIO.addInstance();
+const GPIOB1 = GPIO.addInstance();
+const UART   = scripting.addModule("/ti/driverlib/UART", {}, false);
+const UART1  = UART.addInstance();
+const UART2  = UART.addInstance();
+const SYSCTL = scripting.addModule("/ti/driverlib/SYSCTL");
+
+GPIOA1.$name = "GPIO_ENCODER_A";
+GPIOA1.associatedPins.create(4);
+GPIOA1.associatedPins[0].$name = "RF_A";
+GPIOA1.associatedPins[0].direction = "INPUT";
+GPIOA1.associatedPins[0].internalResistor = "PULL_UP";
+GPIOA1.associatedPins[0].interruptEn = true;
+GPIOA1.associatedPins[0].polarity = "RISE_FALL";
+GPIOA1.associatedPins[0].pin.$assign = "PA28";
+GPIOA1.associatedPins[1].$name = "RF_B";
+GPIOA1.associatedPins[1].direction = "INPUT";
+GPIOA1.associatedPins[1].internalResistor = "PULL_UP";
+GPIOA1.associatedPins[1].interruptEn = true;
+GPIOA1.associatedPins[1].polarity = "RISE_FALL";
+GPIOA1.associatedPins[1].pin.$assign = "PA31";
+GPIOA1.associatedPins[2].$name = "RR_A";
+GPIOA1.associatedPins[2].direction = "INPUT";
+GPIOA1.associatedPins[2].internalResistor = "PULL_UP";
+GPIOA1.associatedPins[2].interruptEn = true;
+GPIOA1.associatedPins[2].polarity = "RISE_FALL";
+GPIOA1.associatedPins[2].pin.$assign = "PA29";
+GPIOA1.associatedPins[3].$name = "RR_B";
+GPIOA1.associatedPins[3].direction = "INPUT";
+GPIOA1.associatedPins[3].internalResistor = "PULL_UP";
+GPIOA1.associatedPins[3].interruptEn = true;
+GPIOA1.associatedPins[3].polarity = "RISE_FALL";
+GPIOA1.associatedPins[3].pin.$assign = "PA30";
+
+GPIOB1.$name = "GPIO_ENCODER_B";
+GPIOB1.associatedPins.create(4);
+GPIOB1.associatedPins[0].$name = "LF_A";
+GPIOB1.associatedPins[0].direction = "INPUT";
+GPIOB1.associatedPins[0].internalResistor = "PULL_UP";
+GPIOB1.associatedPins[0].interruptEn = true;
+GPIOB1.associatedPins[0].polarity = "RISE_FALL";
+GPIOB1.associatedPins[0].pin.$assign = "PB15";
+GPIOB1.associatedPins[1].$name = "LF_B";
+GPIOB1.associatedPins[1].direction = "INPUT";
+GPIOB1.associatedPins[1].internalResistor = "PULL_UP";
+GPIOB1.associatedPins[1].interruptEn = true;
+GPIOB1.associatedPins[1].polarity = "RISE_FALL";
+GPIOB1.associatedPins[1].pin.$assign = "PB16";
+GPIOB1.associatedPins[2].$name = "LR_A";
+GPIOB1.associatedPins[2].direction = "INPUT";
+GPIOB1.associatedPins[2].internalResistor = "PULL_UP";
+GPIOB1.associatedPins[2].interruptEn = true;
+GPIOB1.associatedPins[2].polarity = "RISE_FALL";
+GPIOB1.associatedPins[2].pin.$assign = "PB10";
+GPIOB1.associatedPins[3].$name = "LR_B";
+GPIOB1.associatedPins[3].direction = "INPUT";
+GPIOB1.associatedPins[3].internalResistor = "PULL_UP";
+GPIOB1.associatedPins[3].interruptEn = true;
+GPIOB1.associatedPins[3].polarity = "RISE_FALL";
+GPIOB1.associatedPins[3].pin.$assign = "PB11";
+
+UART1.$name = "UART_DEBUG";
+UART1.profile = "CONFIG_PROFILE_1";
+UART1.peripheral.$assign = "UART0";
+UART1.targetBaudRate = 115200;
+UART1.enableInternalLoopback = false;
+UART1.enableFIFO = false;
+UART1.peripheral.txPin.$assign = "PA10";
+UART1.peripheral.rxPin.$assign = "PA11";
+
+UART2.$name = "UART_HC05";
+UART2.profile = "CONFIG_PROFILE_1";
+UART2.peripheral.$assign = "UART1";
+UART2.targetBaudRate = 115200;
+UART2.enableInternalLoopback = false;
+UART2.enableFIFO = false;
+UART2.peripheral.txPin.$assign = "PA8";
+UART2.peripheral.rxPin.$assign = "PA9";
+
+SYSCTL.forceDefaultClkConfig = true;
+SYSCTL.clockTreeEn = true;
