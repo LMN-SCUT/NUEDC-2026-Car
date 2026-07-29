@@ -56,10 +56,12 @@
 
 /* 初始参数，只用于低速首轮调试。 */
 #define LINE_BASE_SPEED_PERCENT       24
-#define LINE_MAX_SPEED_PERCENT        30
+#define LINE_MAX_SPEED_PERCENT        35
+#define LINE_MIN_FORWARD_PERCENT      10
 #define LINE_START_BOOST_PERCENT      30
 #define LINE_START_BOOST_MS           500U
-#define LINE_SEARCH_SPEED_PERCENT     20
+#define LINE_SEARCH_OUTER_PERCENT     35
+#define LINE_SEARCH_INNER_PERCENT     10
 #define LINE_MEDIUM_SPEED_PERCENT     22
 #define LINE_LARGE_SPEED_PERCENT      20
 #define LINE_WIDE_SPEED_PERCENT       20
@@ -75,9 +77,8 @@
 #define LINE_WIDE_ACTIVE_MIN          4U
 
 /*
- * 第二次地图实测中，正误差持续增大时原差速命令让整车继续向左偏，
- * 说明当前实车的左右差速转向极性与软件初始约定相反。
- * 置1后统一交换灰度外环的左右命令，普通循迹和丢线搜索同时生效。
+ * 当前实车已经确认左侧为MB/MD、右侧为MA/MC，正常配置保持为0。
+ * 该宏只保留作方向诊断，不应用它掩盖轮组映射错误。
  */
 #define LINE_SWAP_SIDE_COMMANDS       0U
 

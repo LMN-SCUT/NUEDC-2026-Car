@@ -44,15 +44,33 @@ static int16_t update_one_wheel(WheelPI *pi, int32_t target,
 
     error = (float)(target - measured);
     pi->integral += SPEED_PI_KI * error;
-    pi->integral = clamp_float(pi->integral,
-                               -SPEED_PI_INTEGRAL_LIMIT_PERCENT,
-                               SPEED_PI_INTEGRAL_LIMIT_PERCENT);
+    /*
+     * 积分只补偿当前目标方向的负载，不允许积累出相反方向的驱动力。
+     * 正目标积分范围0~上限，负目标积分范围-上限~0。
+     */
+    if (target > 0) {
+        pi->integral = clamp_float(
+            pi->integral, 0.0f, SPEED_PI_INTEGRAL_LIMIT_PERCENT);
+    } else {
+        pi->integral = clamp_float(
+            pi->integral, -SPEED_PI_INTEGRAL_LIMIT_PERCENT, 0.0f);
+    }
 
     feedforward = SPEED_PI_FEEDFORWARD_PERCENT_PER_COUNT *
                   (float)target;
     output = feedforward + SPEED_PI_KP * error + pi->integral;
     output = clamp_float(output, -SPEED_PI_PWM_LIMIT_PERCENT,
                          SPEED_PI_PWM_LIMIT_PERCENT);
+
+    /*
+     * 目标为正时只允许正转或滑行，目标为负时只允许反转或滑行。
+     * 这样内轮突然降速时PI不会用反向PWM主动制动，避免四驱底盘在弯道
+     * 形成“左轮前进、右轮反转”的高阻力原地差速状态。
+     */
+    if (((target > 0) && (output < 0.0f)) ||
+        ((target < 0) && (output > 0.0f))) {
+        output = 0.0f;
+    }
 
     if (output >= 0.0f) {
         return (int16_t)(output + 0.5f);

@@ -19,13 +19,17 @@ static float absolute_value(float value)
     return (value < 0.0f) ? -value : value;
 }
 
-static int16_t clamp_speed(float speed)
+/*
+ * 地图循迹只允许向前画弧：外侧轮最高35%，内侧轮最低10%。
+ * 之前允许负目标会在弯道丢线时形成原地差速，四轮横向擦地后真实堵转。
+ */
+static int16_t clamp_forward_speed(float speed)
 {
     if (speed > (float)LINE_MAX_SPEED_PERCENT) {
         return LINE_MAX_SPEED_PERCENT;
     }
-    if (speed < (float)-LINE_MAX_SPEED_PERCENT) {
-        return -LINE_MAX_SPEED_PERCENT;
+    if (speed < (float)LINE_MIN_FORWARD_PERCENT) {
+        return LINE_MIN_FORWARD_PERCENT;
     }
     return (int16_t)speed;
 }
@@ -77,7 +81,7 @@ static void set_side_targets(int16_t left_percent, int16_t right_percent)
 /*
  * 循迹控制主接口：
  * 1. 全白时分阶段执行短时保持、定向搜索、超时停车；
- * 2. 六路以上见黑时作为A点横线候选，外环低速直行，是否到终点由main门控；
+ * 2. 四路以上见黑时作为A点横线候选，外环低速直行，是否到终点由main门控；
  * 3. 普通纵线直接使用newgrey.c由0xDD生成的active_mask，不再做ADC阈值判断；
  * 4. S1~S8默认按车体从左到右排列，权重为-7,-5,-3,-1,+1,+3,+5,+7；
  * 5. 按见黑探头的权重平均值计算位置误差，再分段调整PD增益和基础速度；
@@ -112,25 +116,30 @@ LineFollower_Status LineFollower_Update(const GraySensor_Data *gray)
         }
 
         if (lost_frames < APP_LOST_CONFIRM_FRAMES) {
-            left_speed = clamp_speed(
+            left_speed = clamp_forward_speed(
                 (float)LINE_BASE_SPEED_PERCENT +
                 LINE_KP * current_error);
-            right_speed = clamp_speed(
+            right_speed = clamp_forward_speed(
                 (float)LINE_BASE_SPEED_PERCENT -
                 LINE_KP * current_error);
             set_side_targets(left_speed, right_speed);
         } else if (previous_error < 0.0f) {
-            set_side_targets(-LINE_SEARCH_SPEED_PERCENT,
-                             LINE_SEARCH_SPEED_PERCENT);
+            /*
+             * 黑线最后在左侧：右轮走外弧、左轮走内弧，二者都保持正转。
+             * 禁止原地搜索可显著降低四驱底盘轮胎横向擦地阻力。
+             */
+            set_side_targets(LINE_SEARCH_INNER_PERCENT,
+                             LINE_SEARCH_OUTER_PERCENT);
         } else {
-            set_side_targets(LINE_SEARCH_SPEED_PERCENT,
-                             -LINE_SEARCH_SPEED_PERCENT);
+            /* 黑线最后在右侧：左轮走外弧、右轮走内弧。 */
+            set_side_targets(LINE_SEARCH_OUTER_PERCENT,
+                             LINE_SEARCH_INNER_PERCENT);
         }
         return LINE_TEMPORARILY_LOST;
     }
 
     /*
-     * A点横向启停线通常会让6路以上同时见黑。宽黑不是普通位置偏差：
+     * A点横向启停线实测常让4路同时见黑。宽黑不是普通位置偏差：
      * 本函数只保持低速直行并报告LINE_WIDE_MARKER，不自行决定启停。
      * main.c负责“先离开起点A、运行至少5秒、再次遇A才停车”的门控。
      */
@@ -189,9 +198,9 @@ LineFollower_Status LineFollower_Update(const GraySensor_Data *gray)
                  (LINE_KP * current_error + LINE_KD * derivative);
     previous_error = current_error;
 
-    left_speed = clamp_speed(
+    left_speed = clamp_forward_speed(
         (float)base_speed + correction);
-    right_speed = clamp_speed(
+    right_speed = clamp_forward_speed(
         (float)base_speed - correction);
     set_side_targets(left_speed, right_speed);
     return LINE_TRACKING;

@@ -6,7 +6,7 @@
 
 typedef enum {
     LINE_TRACKING = 0,       /**< 正常检测到纵向黑线并执行PD差速。 */
-    LINE_WIDE_MARKER,        /**< 至少6路见黑，可能是A点横向线。 */
+    LINE_WIDE_MARKER,        /**< 至少4路见黑，可能是A点横向线。 */
     LINE_TEMPORARILY_LOST,   /**< 短时丢线，正在保持或定向搜索。 */
     LINE_LOST_STOP,          /**< 从未见线或丢线超时，已经停车。 */
     LINE_ADC_ERROR           /**< 输入参数/采样异常，已经停车。 */
@@ -26,8 +26,9 @@ void LineFollower_Init(void);
  *
  * 输入直接采用newgrey.c根据0xDD位图生成的黑线active_mask，不使用ADC阈值。
  * 普通黑线使用加权平均位置误差；偏移增大时提高增益并降低基础速度；
- * 启动前500 ms使用30%基础速度助推；6路以上见黑作为宽黑标志；
- * 持续丢线时把目标速度置0。函数不直接写PWM，编码器PI是最终执行器。
+ * 启动前500 ms使用30%基础速度助推；4路以上见黑作为宽黑标志；
+ * 弯道和短时丢线均使用正向弧线差速，持续丢线后才把目标速度置0。
+ * 函数不直接写PWM，编码器PI是最终执行器。
  */
 LineFollower_Status LineFollower_Update(const GraySensor_Data *gray);
 
