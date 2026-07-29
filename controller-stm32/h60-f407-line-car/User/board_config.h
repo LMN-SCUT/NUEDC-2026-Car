@@ -24,7 +24,7 @@
 #define APP_MOTOR_TEST_MODE           1U
 #define APP_FIXED_RIGHT_TURN_TEST_ENABLE 1U
 #define RIGHT_TURN_TEST_LEFT_PWM      65
-#define RIGHT_TURN_TEST_RIGHT_PWM     0
+#define RIGHT_TURN_TEST_RIGHT_PWM     30
 #define RIGHT_TURN_TEST_REPORT_MS     200U
 /*
  * H题循迹控制模式：
@@ -54,7 +54,7 @@
 #define HYBRID_CURVE_OUTER_PWM        60
 #define HYBRID_CURVE_INNER_PWM        15
 #define APP_MOTOR_TEST_PERCENT        40
-#define APP_MOTOR_TEST_MS             1000U
+#define APP_MOTOR_TEST_MS             2000U
 #define APP_MOTOR_TEST_STALL_CHECK    0U
 /*
  * 编码器自检门限：每个1秒报告窗口内，绝对计数达到100即认为该路有脉冲。

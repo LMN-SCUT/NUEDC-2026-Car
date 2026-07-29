@@ -292,7 +292,6 @@ int main(void)
     int32_t encoder_total_mc = 0;
     int32_t encoder_total_md = 0;
     uint8_t encoder_pass_mask = 0U;
-    const SpeedPI_Status *speed_pi_status;
 #endif
     uint32_t run_started_ms = 0U;
 #if !APP_MOTOR_TEST_MODE
@@ -312,8 +311,8 @@ int main(void)
     HC05_Init();
 #if APP_MOTOR_TEST_MODE
 #if APP_FIXED_RIGHT_TURN_TEST_ENABLE
-    HC05_SendString("\r\nFIXED RIGHT TURN TEST,GROUND,KEEP AREA CLEAR\r\n");
-    HC05_SendString("LEFT_MB_MD=65,RIGHT_MA_MC=0,DURATION=1S,PRESS KEY\r\n");
+    HC05_SendString("\r\nFIXED RIGHT ARC TEST,ENCODER_PI=OFF,GROUND\r\n");
+    HC05_SendString("LEFT_MB_MD=65,RIGHT_MA_MC=30,DURATION=2S,PRESS KEY\r\n");
 #elif ENCODER_PI_TEST_ENABLE
     HC05_SendString("\r\nENCODER PI TEST READY,LIFT WHEELS,PRESS KEY\r\n");
     HC05_SendString("TARGET=70 COUNTS/20MS,REPORT=200MS\r\n");
@@ -399,7 +398,7 @@ int main(void)
 #endif
                     app_state = APP_RUNNING;
 #if APP_FIXED_RIGHT_TURN_TEST_ENABLE
-                    HC05_SendString("KEY_OK,RIGHT_TURN_65_0_START,1S\r\n");
+                    HC05_SendString("KEY_OK,RIGHT_ARC_65_30_START,2S\r\n");
 #elif ENCODER_PI_TEST_ENABLE
                     HC05_SendString("KEY_OK,PI_CLOSED_LOOP_START,10S\r\n");
 #else
@@ -432,10 +431,10 @@ int main(void)
                     app_state = APP_FINISHED;
 #if APP_FIXED_RIGHT_TURN_TEST_ENABLE
                     /*
-                     * 右侧PWM为0时，右轮仍可能被车身拖动而产生编码器计数，
-                     * 因此本测试不按四路计数PASS/FAIL，只记录实际轨迹和计数。
+                     * 编码器PI保持关闭，只记录65%/30%固定PWM下的实际轨迹
+                     * 和四轮计数，不能用编码器反向修改前后轮PWM。
                      */
-                    HC05_SendString("RIGHT_TURN_FINAL,TMA=");
+                    HC05_SendString("RIGHT_ARC_FINAL,TMA=");
                     HC05_SendInt32(encoder_total_ma);
                     HC05_SendString(",TMB=");
                     HC05_SendInt32(encoder_total_mb);
@@ -443,7 +442,7 @@ int main(void)
                     HC05_SendInt32(encoder_total_mc);
                     HC05_SendString(",TMD=");
                     HC05_SendInt32(encoder_total_md);
-                    HC05_SendString("\r\nRIGHT_TURN_TEST_DONE,STOP\r\n");
+                    HC05_SendString("\r\nRIGHT_ARC_TEST_DONE,STOP\r\n");
                     break;
 #else
                     /*
@@ -555,8 +554,8 @@ int main(void)
 
 #if APP_FIXED_RIGHT_TURN_TEST_ENABLE
                 /*
-                 * 固定差速隔离测试：左侧MB/MD为65%，右侧MA/MC为0%。
-                 * 不读取灰度、不运行PID，只验证四轮底盘本体能否明显右转。
+                 * 固定圆弧隔离测试：左侧MB/MD为65%，右侧MA/MC为30%。
+                 * 不读取灰度、不运行PID，验证底盘能否向前并形成稳定右弧。
                  */
                 Motor_SetSidePercent(RIGHT_TURN_TEST_LEFT_PWM,
                                      RIGHT_TURN_TEST_RIGHT_PWM);
@@ -582,7 +581,9 @@ int main(void)
                     ) {
                     last_motor_test_report_ms = Timebase_Millis();
 #if ENCODER_PI_TEST_ENABLE
-                    speed_pi_status = SpeedPI_GetStatus();
+                    {
+                    const SpeedPI_Status *speed_pi_status =
+                        SpeedPI_GetStatus();
                     HC05_SendString("PI,MS=");
                     HC05_SendInt32((int32_t)run_time_ms);
                     HC05_SendString(",T=");
@@ -606,6 +607,7 @@ int main(void)
                     HC05_SendString(",PD=");
                     HC05_SendInt32(speed_pi_status->pwm_md);
                     HC05_SendString("\r\n");
+                    }
 #else
                     HC05_SendString("RUN,MS=");
                     HC05_SendInt32((int32_t)run_time_ms);
