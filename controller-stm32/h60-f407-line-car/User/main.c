@@ -45,15 +45,41 @@ static uint8_t pi_total_within_10_percent(int32_t actual, int32_t target)
  * H题地图循迹遥测：
  * D/B/N是灰度原始白位图、黑线位图和见黑数量；E是位置误差x100；
  * ST是循迹状态；ARM表示已离开起点A横线；LT/RT是灰度外环目标百分比；
- * EA~ED是本20 ms编码器计数；PA~PD是四路速度PI输出PWM百分比。
+ * TA~TD和EA~ED分别是最近500 ms目标/实际累计计数；
+ * PA~PD是四路速度PI当前输出PWM百分比。
  */
 #if !APP_MOTOR_TEST_MODE
-static void send_track_test_frame(const Encoder_Delta *delta)
+static void send_wait_test_frame(void)
+{
+    HC05_SendString("WAIT,K=");
+    HC05_SendInt32((int32_t)Key_IsPressed());
+    HC05_SendString(",ON=");
+    HC05_SendInt32((int32_t)gray_i2c_online);
+    HC05_SendString(",I2C=");
+    HC05_SendInt32((int32_t)gray_i2c_error);
+    HC05_SendString(",D=0x");
+    HC05_SendHex8(gray_i2c_raw_mask);
+    HC05_SendString(",B=0x");
+    HC05_SendHex8(gray_active_mask);
+    HC05_SendString(",N=");
+    HC05_SendInt32((int32_t)gray_active_count);
+    HC05_SendString("\r\n");
+}
+
+static void send_track_test_frame(const Encoder_Delta *encoder_sum,
+                                  const Encoder_Delta *target_sum,
+                                  uint8_t finish_marker_frames)
 {
     const SpeedPI_Status *speed = SpeedPI_GetStatus();
 
     HC05_SendString("MAP,MS=");
     HC05_SendInt32((int32_t)run_time_ms);
+    HC05_SendString(",AS=");
+    HC05_SendInt32((int32_t)app_state);
+    HC05_SendString(",ON=");
+    HC05_SendInt32((int32_t)gray_i2c_online);
+    HC05_SendString(",I2C=");
+    HC05_SendInt32((int32_t)gray_i2c_error);
     HC05_SendString(",D=0x");
     HC05_SendHex8(gray_i2c_raw_mask);
     HC05_SendString(",B=0x");
@@ -66,18 +92,28 @@ static void send_track_test_frame(const Encoder_Delta *delta)
     HC05_SendInt32((int32_t)line_status);
     HC05_SendString(",ARM=");
     HC05_SendInt32((int32_t)track_finish_armed);
+    HC05_SendString(",FM=");
+    HC05_SendInt32((int32_t)finish_marker_frames);
     HC05_SendString(",LT=");
     HC05_SendInt32((int32_t)LineFollower_LeftTargetPercent());
     HC05_SendString(",RT=");
     HC05_SendInt32((int32_t)LineFollower_RightTargetPercent());
+    HC05_SendString(",TA=");
+    HC05_SendInt32(target_sum->ma);
+    HC05_SendString(",TB=");
+    HC05_SendInt32(target_sum->mb);
+    HC05_SendString(",TC=");
+    HC05_SendInt32(target_sum->mc);
+    HC05_SendString(",TD=");
+    HC05_SendInt32(target_sum->md);
     HC05_SendString(",EA=");
-    HC05_SendInt32(delta->ma);
+    HC05_SendInt32(encoder_sum->ma);
     HC05_SendString(",EB=");
-    HC05_SendInt32(delta->mb);
+    HC05_SendInt32(encoder_sum->mb);
     HC05_SendString(",EC=");
-    HC05_SendInt32(delta->mc);
+    HC05_SendInt32(encoder_sum->mc);
     HC05_SendString(",ED=");
-    HC05_SendInt32(delta->md);
+    HC05_SendInt32(encoder_sum->md);
     HC05_SendString(",PA=");
     HC05_SendInt32(speed->pwm_ma);
     HC05_SendString(",PB=");
@@ -185,6 +221,8 @@ int main(void)
     uint32_t last_track_report_ms = 0U;
     uint8_t start_marker_clear_frames = 0U;
     uint8_t finish_marker_frames = 0U;
+    Encoder_Delta track_encoder_sum = {0, 0, 0, 0};
+    Encoder_Delta track_target_sum = {0, 0, 0, 0};
 #endif
     Encoder_Delta encoder_delta;
 
@@ -202,6 +240,7 @@ int main(void)
 #else
     HC05_SendString("\r\nH60 H-MAP TRACK,GRAY+ENCODER_PI,115200\r\n");
     HC05_SendString("START AT A,FACE A->B,CLOCKWISE\r\n");
+    HC05_SendString("MAP: T*=TARGET_SUM,E*=ENCODER_SUM,P*=PWM,500MS\r\n");
 #endif
     Key_Init();
     Motor_Init();
@@ -572,6 +611,19 @@ int main(void)
                 track_finish_detected = 0U;
                 start_marker_clear_frames = 0U;
                 finish_marker_frames = 0U;
+                track_encoder_sum.ma = 0;
+                track_encoder_sum.mb = 0;
+                track_encoder_sum.mc = 0;
+                track_encoder_sum.md = 0;
+                track_target_sum.ma = 0;
+                track_target_sum.mb = 0;
+                track_target_sum.mc = 0;
+                track_target_sum.md = 0;
+                if ((uint32_t)(Timebase_Millis() -
+                               last_track_report_ms) >= 1000U) {
+                    last_track_report_ms = Timebase_Millis();
+                    send_wait_test_frame();
+                }
                 if (Key_StartPressedEvent() != 0U) {
                     run_started_ms = Timebase_Millis();
                     LineFollower_Init();
@@ -586,6 +638,10 @@ int main(void)
             case APP_RUNNING:
                 run_time_ms =
                     (uint32_t)(Timebase_Millis() - run_started_ms);
+                track_encoder_sum.ma += encoder_delta.ma;
+                track_encoder_sum.mb += encoder_delta.mb;
+                track_encoder_sum.mc += encoder_delta.mc;
+                track_encoder_sum.md += encoder_delta.md;
 
                 /*
                  * 当前阶段忽略A点启停横线，只验证环形循迹稳定性。
@@ -655,6 +711,13 @@ int main(void)
                     LineFollower_LeftTargetPercent(),
                     LineFollower_RightTargetPercent());
                 SpeedPI_Update(&encoder_delta);
+                {
+                    const SpeedPI_Status *speed = SpeedPI_GetStatus();
+                    track_target_sum.ma += speed->target_ma;
+                    track_target_sum.mb += speed->target_mb;
+                    track_target_sum.mc += speed->target_mc;
+                    track_target_sum.md += speed->target_md;
+                }
 
                 if (MotorProtection_Update(Timebase_Millis(),
                                            &encoder_delta)) {
@@ -668,7 +731,17 @@ int main(void)
                                last_track_report_ms) >=
                     APP_TRACK_REPORT_MS) {
                     last_track_report_ms = Timebase_Millis();
-                    send_track_test_frame(&encoder_delta);
+                    send_track_test_frame(&track_encoder_sum,
+                                          &track_target_sum,
+                                          finish_marker_frames);
+                    track_encoder_sum.ma = 0;
+                    track_encoder_sum.mb = 0;
+                    track_encoder_sum.mc = 0;
+                    track_encoder_sum.md = 0;
+                    track_target_sum.ma = 0;
+                    track_target_sum.mb = 0;
+                    track_target_sum.mc = 0;
+                    track_target_sum.md = 0;
                 }
                 break;
 
