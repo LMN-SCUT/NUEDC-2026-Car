@@ -68,7 +68,18 @@
 #define LINE_MEDIUM_ERROR_LIMIT       3.0f
 #define LINE_MEDIUM_GAIN_SCALE        1.2f
 #define LINE_LARGE_GAIN_SCALE         1.5f
-#define LINE_WIDE_ACTIVE_MIN          6U
+/*
+ * A点启停横线实测常见B=0x3C或0x33，即4路同时见黑；
+ * 普通纵向1.8 cm黑线通常只有1~2路见黑。
+ */
+#define LINE_WIDE_ACTIVE_MIN          4U
+
+/*
+ * 第二次地图实测中，正误差持续增大时原差速命令让整车继续向左偏，
+ * 说明当前实车的左右差速转向极性与软件初始约定相反。
+ * 置1后统一交换灰度外环的左右命令，普通循迹和丢线搜索同时生效。
+ */
+#define LINE_SWAP_SIDE_COMMANDS       1U
 
 /*
  * 感为I2C八路灰度测试配置。

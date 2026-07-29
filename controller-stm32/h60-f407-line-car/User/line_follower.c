@@ -58,11 +58,20 @@ int16_t LineFollower_RightTargetPercent(void)
     return right_target_percent;
 }
 
-/* 灰度外环只保存左右目标，最终PWM统一由四路编码器PI写入。 */
+/*
+ * 灰度外环只保存左右目标，最终PWM统一由四路编码器PI写入。
+ * LINE_SWAP_SIDE_COMMANDS用于修正实车已经观测到的差速转向极性相反，
+ * 放在统一出口处理可保证正常循迹、短时保持和丢线搜索一起修正。
+ */
 static void set_side_targets(int16_t left_percent, int16_t right_percent)
 {
+#if LINE_SWAP_SIDE_COMMANDS
+    left_target_percent = right_percent;
+    right_target_percent = left_percent;
+#else
     left_target_percent = left_percent;
     right_target_percent = right_percent;
+#endif
 }
 
 /*
