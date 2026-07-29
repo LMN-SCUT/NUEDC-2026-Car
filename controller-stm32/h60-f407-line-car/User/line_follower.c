@@ -20,7 +20,7 @@ static float absolute_value(float value)
 }
 
 /*
- * 地图循迹只允许向前画弧：外侧轮最高35%，内侧轮最低10%。
+ * 地图循迹只允许向前画弧：外侧轮最高40%，内侧轮最低10%。
  * 之前允许负目标会在弯道丢线时形成原地差速，四轮横向擦地后真实堵转。
  */
 static int16_t clamp_forward_speed(float speed)
