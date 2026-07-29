@@ -16,11 +16,16 @@
  */
 
 /*
- * 当前启用H题地图循迹正式测试分支，APP_MOTOR_TEST_MODE=0。
- * 如需重新做四轮架空/编码器PI隔离测试，再临时改为1。
+ * 当前临时启用固定差速右转测试，验证底盘在不使用灰度/PID时能否转向。
+ * 测试结束后必须把APP_MOTOR_TEST_MODE和APP_FIXED_RIGHT_TURN_TEST_ENABLE
+ * 恢复为0，才能重新进入H题地图循迹。
  */
 #define APP_ENABLE_MOTORS             1U
-#define APP_MOTOR_TEST_MODE           0U
+#define APP_MOTOR_TEST_MODE           1U
+#define APP_FIXED_RIGHT_TURN_TEST_ENABLE 1U
+#define RIGHT_TURN_TEST_LEFT_PWM      65
+#define RIGHT_TURN_TEST_RIGHT_PWM     0
+#define RIGHT_TURN_TEST_REPORT_MS     200U
 /*
  * H题循迹控制模式：
  * GRAY_PWM=灰度目标直接作为PWM；
@@ -49,7 +54,7 @@
 #define HYBRID_CURVE_OUTER_PWM        60
 #define HYBRID_CURVE_INNER_PWM        15
 #define APP_MOTOR_TEST_PERCENT        40
-#define APP_MOTOR_TEST_MS             10000U
+#define APP_MOTOR_TEST_MS             1000U
 #define APP_MOTOR_TEST_STALL_CHECK    0U
 /*
  * 编码器自检门限：每个1秒报告窗口内，绝对计数达到100即认为该路有脉冲。
@@ -62,7 +67,7 @@
  * 70计数/20 ms约等于3500计数/秒，低于当前40%落地稳定速度，
  * 适合先进行闭环验证。参数尚未经过实车阶跃响应整定。
  */
-#define ENCODER_PI_TEST_ENABLE        1U
+#define ENCODER_PI_TEST_ENABLE        0U
 #define ENCODER_PI_TEST_TARGET        70
 #define ENCODER_PI_TEST_REPORT_MS     200U
 #define SPEED_PI_KP                   0.12f

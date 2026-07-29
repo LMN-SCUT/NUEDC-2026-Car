@@ -1,5 +1,22 @@
 # STM32F407VET6 H题循迹初步工程
 
+## 当前固定差速右转隔离测试（2026-07-29）
+
+- 当前 `APP_MOTOR_TEST_MODE=1`、`APP_FIXED_RIGHT_TURN_TEST_ENABLE=1`，
+  暂时不会运行灰度循迹、PID、A点识别或30秒任务。
+- 小车放在宽阔地面，保持周围无人和障碍；按H60板载K键后，左侧MB/MD
+  直接输出65% PWM，右侧MA/MC输出0%，持续1秒后自动普通停车。
+- 本测试只回答“底盘在左65%/右0%时能否明显右转”。编码器继续记录，
+  每200 ms输出 `EMA~EMD`，结束输出 `RIGHT_TURN_FINAL`；右轮即使PWM为0，
+  也可能被车身拖动产生计数，因此不做四路PASS/FAIL。
+- 正确启动横幅为 `FIXED RIGHT TURN TEST,GROUND,KEEP AREA CLEAR`，按键后应
+  显示 `KEY_OK,RIGHT_TURN_65_0_START,1S`，结束显示
+  `RIGHT_TURN_TEST_DONE,STOP`。
+- 若能明显右转，说明底盘具备差速转向能力，后续回到循迹算法处理宽黑、
+  速度和误差状态；若仍几乎直行，应优先检查轮胎/轮子类型与安装方向、
+  底盘侧向摩擦、电机接线位置和机械负载，而不是继续增大PID。
+- Keil ARMCC 5.06 update 7 全量编译：0 Error、0 Warning，Code=8192。
+
 ## 当前 H 题地图循迹固件（2026-07-29）
 
 - 当前按用户决定切换到第二方案：

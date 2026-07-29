@@ -311,7 +311,10 @@ int main(void)
     board_buzzer_force_off();
     HC05_Init();
 #if APP_MOTOR_TEST_MODE
-#if ENCODER_PI_TEST_ENABLE
+#if APP_FIXED_RIGHT_TURN_TEST_ENABLE
+    HC05_SendString("\r\nFIXED RIGHT TURN TEST,GROUND,KEEP AREA CLEAR\r\n");
+    HC05_SendString("LEFT_MB_MD=65,RIGHT_MA_MC=0,DURATION=1S,PRESS KEY\r\n");
+#elif ENCODER_PI_TEST_ENABLE
     HC05_SendString("\r\nENCODER PI TEST READY,LIFT WHEELS,PRESS KEY\r\n");
     HC05_SendString("TARGET=70 COUNTS/20MS,REPORT=200MS\r\n");
 #else
@@ -395,7 +398,9 @@ int main(void)
                                        ENCODER_PI_TEST_TARGET);
 #endif
                     app_state = APP_RUNNING;
-#if ENCODER_PI_TEST_ENABLE
+#if APP_FIXED_RIGHT_TURN_TEST_ENABLE
+                    HC05_SendString("KEY_OK,RIGHT_TURN_65_0_START,1S\r\n");
+#elif ENCODER_PI_TEST_ENABLE
                     HC05_SendString("KEY_OK,PI_CLOSED_LOOP_START,10S\r\n");
 #else
                     HC05_SendString("KEY_OK,ENCODER_TEST_START,40_PERCENT,10S\r\n");
@@ -425,6 +430,22 @@ int main(void)
                     Motor_Stop();
 #endif
                     app_state = APP_FINISHED;
+#if APP_FIXED_RIGHT_TURN_TEST_ENABLE
+                    /*
+                     * 右侧PWM为0时，右轮仍可能被车身拖动而产生编码器计数，
+                     * 因此本测试不按四路计数PASS/FAIL，只记录实际轨迹和计数。
+                     */
+                    HC05_SendString("RIGHT_TURN_FINAL,TMA=");
+                    HC05_SendInt32(encoder_total_ma);
+                    HC05_SendString(",TMB=");
+                    HC05_SendInt32(encoder_total_mb);
+                    HC05_SendString(",TMC=");
+                    HC05_SendInt32(encoder_total_mc);
+                    HC05_SendString(",TMD=");
+                    HC05_SendInt32(encoder_total_md);
+                    HC05_SendString("\r\nRIGHT_TURN_TEST_DONE,STOP\r\n");
+                    break;
+#else
                     /*
                      * 最终判定按10秒累计绝对计数完成。门限乘以测试秒数，
                      * 防止某一路只偶发跳动几下也被误认为编码器正常。
@@ -529,9 +550,17 @@ int main(void)
                     }
 #endif
                     break;
+#endif
                 }
 
-#if ENCODER_PI_TEST_ENABLE
+#if APP_FIXED_RIGHT_TURN_TEST_ENABLE
+                /*
+                 * 固定差速隔离测试：左侧MB/MD为65%，右侧MA/MC为0%。
+                 * 不读取灰度、不运行PID，只验证四轮底盘本体能否明显右转。
+                 */
+                Motor_SetSidePercent(RIGHT_TURN_TEST_LEFT_PWM,
+                                     RIGHT_TURN_TEST_RIGHT_PWM);
+#elif ENCODER_PI_TEST_ENABLE
                 /*
                  * 闭环测试中PI是唯一PWM写入者：目标固定为每20 ms 70计数，
                  * 四路根据各自编码器反馈独立调节占空比。
@@ -545,6 +574,8 @@ int main(void)
                                last_motor_test_report_ms) >=
 #if ENCODER_PI_TEST_ENABLE
                     ENCODER_PI_TEST_REPORT_MS
+#elif APP_FIXED_RIGHT_TURN_TEST_ENABLE
+                    RIGHT_TURN_TEST_REPORT_MS
 #else
                     1000U
 #endif
