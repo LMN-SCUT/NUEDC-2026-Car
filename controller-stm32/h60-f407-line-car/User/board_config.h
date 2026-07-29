@@ -22,12 +22,32 @@
 #define APP_ENABLE_MOTORS             1U
 #define APP_MOTOR_TEST_MODE           0U
 /*
- * H题循迹控制模式开关：
- * 0=灰度PD目标直接作为左右PWM，编码器仅测速/遥测/堵转保护；
- * 1=灰度PD给速度目标，再由四路编码器PI计算PWM。
- * 当前置0用于判断四轮速度闭环是否限制了弯道转向。
+ * H题循迹控制模式：
+ * GRAY_PWM=灰度目标直接作为PWM；
+ * ENCODER_PI=全程四路速度PI；
+ * HYBRID=直线使用PI，大误差/丢线时使用灰度直接PWM。
  */
-#define APP_ENCODER_SPEED_PI_ENABLE   0U
+#define TRACK_CONTROL_GRAY_PWM        0U
+#define TRACK_CONTROL_ENCODER_PI      1U
+#define TRACK_CONTROL_HYBRID          2U
+#define APP_TRACK_CONTROL_MODE        TRACK_CONTROL_GRAY_PWM
+
+/*
+ * 纯灰度PWM第二轮对照不再把24%目标原样输出，而是放大1.7倍：
+ * 直线24%约为41% PWM，弯道35%/10%约为60%/17% PWM。
+ * 最终硬限幅65%，编码器只监测和执行堵转保护。
+ */
+#define GRAY_DIRECT_PWM_SCALE_NUM      17
+#define GRAY_DIRECT_PWM_SCALE_DEN      10
+#define GRAY_DIRECT_PWM_LIMIT_PERCENT  65
+
+/*
+ * 混合模式在|灰度误差|>=3.0或短时丢线时旁路速度PI。
+ * 外侧60%、内侧15%只用于弯道，直线仍使用原24%速度目标和编码器PI。
+ */
+#define HYBRID_DIRECT_ERROR_THRESHOLD 3.0f
+#define HYBRID_CURVE_OUTER_PWM        60
+#define HYBRID_CURVE_INNER_PWM        15
 #define APP_MOTOR_TEST_PERCENT        40
 #define APP_MOTOR_TEST_MS             10000U
 #define APP_MOTOR_TEST_STALL_CHECK    0U

@@ -30,6 +30,7 @@ volatile Encoder_Delta encoder_delta_debug;
 volatile LineFollower_Status line_status;
 volatile uint8_t track_finish_armed;
 volatile uint8_t track_finish_detected;
+volatile uint8_t track_control_direct;
 
 #if APP_MOTOR_TEST_MODE && ENCODER_PI_TEST_ENABLE
 /* 判断10秒累计速度是否落在目标的±10%内，只作为闭环初步验收标准。 */
@@ -46,9 +47,36 @@ static uint8_t pi_total_within_10_percent(int32_t actual, int32_t target)
  * D/B/N是灰度原始白位图、黑线位图和见黑数量；E是位置误差x100；
  * ST是循迹状态；ARM表示已离开起点A横线；LT/RT是灰度外环目标百分比；
  * TA~TD和EA~ED分别是最近500 ms等效目标/实际累计计数；
- * PA~PD始终读取电机模块的最终PWM命令，PI旁路时也能正确显示。
+ * PA~PD始终读取电机模块的最终PWM命令；CM=1表示大误差直接PWM，
+ * 它不能单凭一帧灰度区分“地图弯道”和“直线严重歪斜”。
  */
 #if !APP_MOTOR_TEST_MODE
+/*
+ * 纯灰度直接PWM的目标放大：
+ * 第一轮原样输出21%~26%无法克服落地静摩擦，因此第二轮按1.7倍换算，
+ * 并在65%处限幅。编码器反馈不会进入这个计算。
+ */
+static int16_t gray_target_to_direct_pwm(int16_t target_percent)
+{
+    int32_t scaled =
+        (int32_t)target_percent * GRAY_DIRECT_PWM_SCALE_NUM;
+
+    if (scaled >= 0) {
+        scaled = (scaled + (GRAY_DIRECT_PWM_SCALE_DEN / 2)) /
+                 GRAY_DIRECT_PWM_SCALE_DEN;
+    } else {
+        scaled = (scaled - (GRAY_DIRECT_PWM_SCALE_DEN / 2)) /
+                 GRAY_DIRECT_PWM_SCALE_DEN;
+    }
+
+    if (scaled > GRAY_DIRECT_PWM_LIMIT_PERCENT) {
+        scaled = GRAY_DIRECT_PWM_LIMIT_PERCENT;
+    } else if (scaled < -GRAY_DIRECT_PWM_LIMIT_PERCENT) {
+        scaled = -GRAY_DIRECT_PWM_LIMIT_PERCENT;
+    }
+    return (int16_t)scaled;
+}
+
 static void send_wait_test_frame(void)
 {
     HC05_SendString("WAIT,K=");
@@ -106,6 +134,8 @@ static void send_track_test_frame(const Encoder_Delta *encoder_sum,
     HC05_SendInt32((int32_t)track_finish_armed);
     HC05_SendString(",FM=");
     HC05_SendInt32((int32_t)finish_marker_frames);
+    HC05_SendString(",CM=");
+    HC05_SendInt32((int32_t)track_control_direct);
     HC05_SendString(",LT=");
     HC05_SendInt32((int32_t)LineFollower_LeftTargetPercent());
     HC05_SendString(",RT=");
@@ -289,10 +319,12 @@ int main(void)
 #endif
     HC05_SendString("OK bits: bit0=MA,bit1=MB,bit2=MC,bit3=MD\r\n");
 #else
-#if APP_ENCODER_SPEED_PI_ENABLE
+#if APP_TRACK_CONTROL_MODE == TRACK_CONTROL_ENCODER_PI
     HC05_SendString("\r\nH60 H-MAP TRACK,CTRL=ENCODER_PI,115200\r\n");
+#elif APP_TRACK_CONTROL_MODE == TRACK_CONTROL_GRAY_PWM
+    HC05_SendString("\r\nH60 H-MAP TRACK,CTRL=GRAY_PWM_X1P7,115200\r\n");
 #else
-    HC05_SendString("\r\nH60 H-MAP TRACK,CTRL=GRAY_PWM,115200\r\n");
+    HC05_SendString("\r\nH60 H-MAP TRACK,CTRL=HYBRID_PI_PWM,115200\r\n");
 #endif
     HC05_SendString("START AT A,FACE A->B,CLOCKWISE\r\n");
     HC05_SendString("MAP: T*=EQUIV_TARGET,E*=ENCODER_SUM,P*=FINAL_PWM,500MS\r\n");
@@ -687,6 +719,7 @@ int main(void)
                 run_time_ms = 0U;
                 track_finish_armed = 0U;
                 track_finish_detected = 0U;
+                track_control_direct = 0U;
                 start_marker_clear_frames = 0U;
                 finish_marker_frames = 0U;
                 track_encoder_sum.ma = 0;
@@ -786,12 +819,14 @@ int main(void)
                 }
 
                 /*
-                 * 对照模式：
-                 * APP_ENCODER_SPEED_PI_ENABLE=0时，灰度左右百分比直接写PWM；
-                 * 编码器仍持续测速并参与堵转保护，但不会修正电机输出。
-                 * 置1即可恢复灰度外环+四路编码器PI内环，不删除原闭环代码。
+                 * 三种控制模式共用灰度、编码器遥测和堵转保护：
+                 * 1. ENCODER_PI：全程由四路速度PI写PWM；
+                 * 2. GRAY_PWM：灰度左右百分比直接写PWM；
+                 * 3. HYBRID：小误差用PI，大误差/丢线直接给外侧60%、内侧15%。
+                 * 混合模式切换时清空PI积分，防止回到直线后沿用弯道历史补偿。
                  */
-#if APP_ENCODER_SPEED_PI_ENABLE
+#if APP_TRACK_CONTROL_MODE == TRACK_CONTROL_ENCODER_PI
+                track_control_direct = 0U;
                 SpeedPI_SetSidePercentTargets(
                     LineFollower_LeftTargetPercent(),
                     LineFollower_RightTargetPercent());
@@ -803,26 +838,91 @@ int main(void)
                     track_target_sum.mc += speed->target_mc;
                     track_target_sum.md += speed->target_md;
                 }
-#else
-                Motor_SetSidePercent(
-                    LineFollower_LeftTargetPercent(),
-                    LineFollower_RightTargetPercent());
+#elif APP_TRACK_CONTROL_MODE == TRACK_CONTROL_GRAY_PWM
+                {
+                    int16_t direct_left_pwm =
+                        gray_target_to_direct_pwm(
+                            LineFollower_LeftTargetPercent());
+                    int16_t direct_right_pwm =
+                        gray_target_to_direct_pwm(
+                            LineFollower_RightTargetPercent());
+
+                track_control_direct = 1U;
+                    Motor_SetSidePercent(direct_left_pwm,
+                                         direct_right_pwm);
                 /*
-                 * TA~TD仍按原换算比例累计“等效速度目标”，只用于和EA~ED
-                 * 对照；直接PWM模式不会用这些目标闭环调节。
+                     * TA~TD按最终PWM换算为等效计数，便于和EA~ED观察趋势；
+                     * 它不是闭环速度目标，编码器不会反向修改PA~PD。
                  */
                 track_target_sum.ma +=
-                    (int32_t)LineFollower_RightTargetPercent() *
+                        (int32_t)direct_right_pwm *
                     (int32_t)SPEED_PI_COUNTS_PER_PERCENT;
                 track_target_sum.mb +=
-                    (int32_t)LineFollower_LeftTargetPercent() *
+                        (int32_t)direct_left_pwm *
                     (int32_t)SPEED_PI_COUNTS_PER_PERCENT;
                 track_target_sum.mc +=
-                    (int32_t)LineFollower_RightTargetPercent() *
+                        (int32_t)direct_right_pwm *
                     (int32_t)SPEED_PI_COUNTS_PER_PERCENT;
                 track_target_sum.md +=
-                    (int32_t)LineFollower_LeftTargetPercent() *
+                        (int32_t)direct_left_pwm *
                     (int32_t)SPEED_PI_COUNTS_PER_PERCENT;
+                }
+#else
+                if ((line_status == LINE_TEMPORARILY_LOST) ||
+                    (line_error >= HYBRID_DIRECT_ERROR_THRESHOLD) ||
+                    (line_error <= -HYBRID_DIRECT_ERROR_THRESHOLD)) {
+                    int16_t direct_left_pwm;
+                    int16_t direct_right_pwm;
+
+                    if (track_control_direct == 0U) {
+                        SpeedPI_Reset();
+                    }
+                    track_control_direct = 1U;
+
+                    /*
+                     * LT>RT说明需要右转，左轮为外侧；反之右轮为外侧。
+                     * 丢线时LineFollower仍保留最后一次搜索方向，因此同样适用。
+                     */
+                    if (LineFollower_LeftTargetPercent() >=
+                        LineFollower_RightTargetPercent()) {
+                        direct_left_pwm = HYBRID_CURVE_OUTER_PWM;
+                        direct_right_pwm = HYBRID_CURVE_INNER_PWM;
+                    } else {
+                        direct_left_pwm = HYBRID_CURVE_INNER_PWM;
+                        direct_right_pwm = HYBRID_CURVE_OUTER_PWM;
+                    }
+                    Motor_SetSidePercent(direct_left_pwm,
+                                         direct_right_pwm);
+
+                    track_target_sum.ma +=
+                        (int32_t)direct_right_pwm *
+                        (int32_t)SPEED_PI_COUNTS_PER_PERCENT;
+                    track_target_sum.mb +=
+                        (int32_t)direct_left_pwm *
+                        (int32_t)SPEED_PI_COUNTS_PER_PERCENT;
+                    track_target_sum.mc +=
+                        (int32_t)direct_right_pwm *
+                        (int32_t)SPEED_PI_COUNTS_PER_PERCENT;
+                    track_target_sum.md +=
+                        (int32_t)direct_left_pwm *
+                        (int32_t)SPEED_PI_COUNTS_PER_PERCENT;
+                } else {
+                    if (track_control_direct != 0U) {
+                        SpeedPI_Reset();
+                    }
+                    track_control_direct = 0U;
+                    SpeedPI_SetSidePercentTargets(
+                        LineFollower_LeftTargetPercent(),
+                        LineFollower_RightTargetPercent());
+                    SpeedPI_Update(&encoder_delta);
+                    {
+                        const SpeedPI_Status *speed = SpeedPI_GetStatus();
+                        track_target_sum.ma += speed->target_ma;
+                        track_target_sum.mb += speed->target_mb;
+                        track_target_sum.mc += speed->target_mc;
+                        track_target_sum.md += speed->target_md;
+                    }
+                }
 #endif
 
                 if (MotorProtection_Update(Timebase_Millis(),
