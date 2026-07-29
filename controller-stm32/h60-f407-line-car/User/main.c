@@ -66,6 +66,20 @@ static void send_wait_test_frame(void)
     HC05_SendString("\r\n");
 }
 
+/* 灰度离线时也持续回传，避免安全停车后的continue形成“串口完全静默”。 */
+static void send_gray_fault_frame(void)
+{
+    HC05_SendString("GRAY_ERROR,AS=");
+    HC05_SendInt32((int32_t)app_state);
+    HC05_SendString(",K=");
+    HC05_SendInt32((int32_t)Key_IsPressed());
+    HC05_SendString(",ON=");
+    HC05_SendInt32((int32_t)gray_i2c_online);
+    HC05_SendString(",I2C=");
+    HC05_SendInt32((int32_t)gray_i2c_error);
+    HC05_SendString(",RETRY=1\r\n");
+}
+
 static void send_track_test_frame(const Encoder_Delta *encoder_sum,
                                   const Encoder_Delta *target_sum,
                                   uint8_t finish_marker_frames)
@@ -221,6 +235,8 @@ int main(void)
     uint32_t last_track_report_ms = 0U;
     uint8_t start_marker_clear_frames = 0U;
     uint8_t finish_marker_frames = 0U;
+    uint8_t gray_fault_active = 0U;
+    uint32_t last_gray_retry_ms = 0U;
     Encoder_Delta track_encoder_sum = {0, 0, 0, 0};
     Encoder_Delta track_target_sum = {0, 0, 0, 0};
 #endif
@@ -255,6 +271,7 @@ int main(void)
 #else
     gray_i2c_online = NewGray_Init() ? 1U : 0U;
     gray_i2c_error = NewGray_LastError();
+    gray_fault_active = (gray_i2c_online == 0U) ? 1U : 0U;
 #endif
     LineFollower_Init();
 
@@ -570,14 +587,40 @@ int main(void)
 #else
 
         if (!NewGray_Read(&gray)) {
-            Motor_Stop();
+            SpeedPI_Reset();
             gray_i2c_online = 0U;
             gray_i2c_error = NewGray_LastError();
+            gray_fault_active = 1U;
             app_state = APP_ERROR;
+
+            if ((uint32_t)(Timebase_Millis() -
+                           last_track_report_ms) >= 1000U) {
+                last_track_report_ms = Timebase_Millis();
+                send_gray_fault_frame();
+            }
+
+            /*
+             * 灰度模块上电可能慢于MCU，或软件I2C偶发被拉低。
+             * 停车状态下每秒重新执行一次总线恢复和Ping；成功后下一帧读取
+             * 会自动回到等待按键，不会在恢复瞬间自行发车。
+             */
+            if ((uint32_t)(Timebase_Millis() -
+                           last_gray_retry_ms) >= 1000U) {
+                last_gray_retry_ms = Timebase_Millis();
+                (void)NewGray_Init();
+            }
+            continue;
         } else {
             gray_i2c_online = 1U;
             gray_i2c_error = 0U;
             publish_gray_debug(&gray);
+            if (gray_fault_active != 0U) {
+                gray_fault_active = 0U;
+                app_state = APP_WAIT_START;
+                LineFollower_Init();
+                SpeedPI_Reset();
+                HC05_SendString("GRAY_RECOVERED,PRESS_KEY\r\n");
+            }
 #if HC05_TEST_STREAM_ENABLE && !APP_ENABLE_MOTORS
             /*
              * 电机安全开关关闭时也运行循迹计算，专供手推横移验证误差方向。
@@ -595,10 +638,6 @@ int main(void)
             send_gray_test_frame();
         }
 #endif
-
-        if (gray_i2c_online == 0U) {
-            continue;
-        }
 
         Encoder_ReadAndReset(&encoder_delta);
         encoder_delta_debug = encoder_delta;
@@ -747,11 +786,27 @@ int main(void)
 
             case APP_FINISHED:
                 Motor_Brake();
+                if ((uint32_t)(Timebase_Millis() -
+                               last_track_report_ms) >= 1000U) {
+                    last_track_report_ms = Timebase_Millis();
+                    HC05_SendString("STATE,FINISHED,MS=");
+                    HC05_SendInt32((int32_t)run_time_ms);
+                    HC05_SendString("\r\n");
+                }
                 break;
 
             case APP_ERROR:
             default:
                 SpeedPI_Reset();
+                if ((uint32_t)(Timebase_Millis() -
+                               last_track_report_ms) >= 1000U) {
+                    last_track_report_ms = Timebase_Millis();
+                    HC05_SendString("STATE,ERROR,ON=");
+                    HC05_SendInt32((int32_t)gray_i2c_online);
+                    HC05_SendString(",I2C=");
+                    HC05_SendInt32((int32_t)gray_i2c_error);
+                    HC05_SendString("\r\n");
+                }
                 break;
         }
 #endif
