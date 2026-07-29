@@ -21,6 +21,13 @@
  */
 #define APP_ENABLE_MOTORS             1U
 #define APP_MOTOR_TEST_MODE           0U
+/*
+ * H题循迹控制模式开关：
+ * 0=灰度PD目标直接作为左右PWM，编码器仅测速/遥测/堵转保护；
+ * 1=灰度PD给速度目标，再由四路编码器PI计算PWM。
+ * 当前置0用于判断四轮速度闭环是否限制了弯道转向。
+ */
+#define APP_ENCODER_SPEED_PI_ENABLE   0U
 #define APP_MOTOR_TEST_PERCENT        40
 #define APP_MOTOR_TEST_MS             10000U
 #define APP_MOTOR_TEST_STALL_CHECK    0U
@@ -56,11 +63,11 @@
 
 /* 初始参数，只用于低速首轮调试。 */
 #define LINE_BASE_SPEED_PERCENT       24
-#define LINE_MAX_SPEED_PERCENT        40
+#define LINE_MAX_SPEED_PERCENT        35
 #define LINE_MIN_FORWARD_PERCENT      10
 #define LINE_START_BOOST_PERCENT      30
 #define LINE_START_BOOST_MS           500U
-#define LINE_SEARCH_OUTER_PERCENT     40
+#define LINE_SEARCH_OUTER_PERCENT     35
 #define LINE_SEARCH_INNER_PERCENT     10
 #define LINE_MEDIUM_SPEED_PERCENT     22
 #define LINE_LARGE_SPEED_PERCENT      20

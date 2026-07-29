@@ -26,8 +26,8 @@ void Motor_SetSidePercent(int16_t left_percent, int16_t right_percent);
 /**
  * @brief 分别设置MA、MB、MC、MD四个电机的PWM百分比。
  *
- * 编码器PI使用本接口分别补偿四个电机。普通循迹不应绕过速度PI反复
- * 调用本接口，否则灰度控制和速度控制会争抢PWM。
+ * 编码器PI使用本接口分别补偿四个电机；灰度直接PWM对照模式则统一调用
+ * Motor_SetSidePercent。两种模式由编译开关互斥，不能在同一周期争抢PWM。
  */
 void Motor_SetWheelPercent(int16_t ma_percent, int16_t mb_percent,
                            int16_t mc_percent, int16_t md_percent);

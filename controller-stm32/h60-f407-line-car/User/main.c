@@ -45,8 +45,8 @@ static uint8_t pi_total_within_10_percent(int32_t actual, int32_t target)
  * H题地图循迹遥测：
  * D/B/N是灰度原始白位图、黑线位图和见黑数量；E是位置误差x100；
  * ST是循迹状态；ARM表示已离开起点A横线；LT/RT是灰度外环目标百分比；
- * TA~TD和EA~ED分别是最近500 ms目标/实际累计计数；
- * PA~PD是四路速度PI当前输出PWM百分比。
+ * TA~TD和EA~ED分别是最近500 ms等效目标/实际累计计数；
+ * PA~PD始终读取电机模块的最终PWM命令，PI旁路时也能正确显示。
  */
 #if !APP_MOTOR_TEST_MODE
 static void send_wait_test_frame(void)
@@ -84,8 +84,6 @@ static void send_track_test_frame(const Encoder_Delta *encoder_sum,
                                   const Encoder_Delta *target_sum,
                                   uint8_t finish_marker_frames)
 {
-    const SpeedPI_Status *speed = SpeedPI_GetStatus();
-
     HC05_SendString("MAP,MS=");
     HC05_SendInt32((int32_t)run_time_ms);
     HC05_SendString(",AS=");
@@ -129,13 +127,13 @@ static void send_track_test_frame(const Encoder_Delta *encoder_sum,
     HC05_SendString(",ED=");
     HC05_SendInt32(encoder_sum->md);
     HC05_SendString(",PA=");
-    HC05_SendInt32(speed->pwm_ma);
+    HC05_SendInt32((int32_t)Motor_MACommand());
     HC05_SendString(",PB=");
-    HC05_SendInt32(speed->pwm_mb);
+    HC05_SendInt32((int32_t)Motor_MBCommand());
     HC05_SendString(",PC=");
-    HC05_SendInt32(speed->pwm_mc);
+    HC05_SendInt32((int32_t)Motor_MCCommand());
     HC05_SendString(",PD=");
-    HC05_SendInt32(speed->pwm_md);
+    HC05_SendInt32((int32_t)Motor_MDCommand());
     HC05_SendString("\r\n");
 }
 
@@ -291,9 +289,13 @@ int main(void)
 #endif
     HC05_SendString("OK bits: bit0=MA,bit1=MB,bit2=MC,bit3=MD\r\n");
 #else
-    HC05_SendString("\r\nH60 H-MAP TRACK,GRAY+ENCODER_PI,115200\r\n");
+#if APP_ENCODER_SPEED_PI_ENABLE
+    HC05_SendString("\r\nH60 H-MAP TRACK,CTRL=ENCODER_PI,115200\r\n");
+#else
+    HC05_SendString("\r\nH60 H-MAP TRACK,CTRL=GRAY_PWM,115200\r\n");
+#endif
     HC05_SendString("START AT A,FACE A->B,CLOCKWISE\r\n");
-    HC05_SendString("MAP: T*=TARGET_SUM,E*=ENCODER_SUM,P*=PWM,500MS\r\n");
+    HC05_SendString("MAP: T*=EQUIV_TARGET,E*=ENCODER_SUM,P*=FINAL_PWM,500MS\r\n");
 #endif
     Key_Init();
     Motor_Init();
@@ -737,7 +739,11 @@ int main(void)
                     (line_status == LINE_LOST_STOP)) {
                     SpeedPI_Reset();
                     app_state = APP_ERROR;
-                    HC05_SendString("LINE_OR_I2C_ERROR,STOP\r\n");
+                    if (line_status == LINE_LOST_STOP) {
+                        HC05_SendString("LINE_LOST_STOP\r\n");
+                    } else {
+                        HC05_SendString("GRAY_INPUT_ERROR,STOP\r\n");
+                    }
                     break;
                 }
 
@@ -780,9 +786,12 @@ int main(void)
                 }
 
                 /*
-                 * 串级控制：灰度PD只生成左右速度目标，四轮编码器PI才写PWM。
-                 * 实车左侧MB/MD共用左目标，右侧MA/MC共用右目标。
+                 * 对照模式：
+                 * APP_ENCODER_SPEED_PI_ENABLE=0时，灰度左右百分比直接写PWM；
+                 * 编码器仍持续测速并参与堵转保护，但不会修正电机输出。
+                 * 置1即可恢复灰度外环+四路编码器PI内环，不删除原闭环代码。
                  */
+#if APP_ENCODER_SPEED_PI_ENABLE
                 SpeedPI_SetSidePercentTargets(
                     LineFollower_LeftTargetPercent(),
                     LineFollower_RightTargetPercent());
@@ -794,6 +803,27 @@ int main(void)
                     track_target_sum.mc += speed->target_mc;
                     track_target_sum.md += speed->target_md;
                 }
+#else
+                Motor_SetSidePercent(
+                    LineFollower_LeftTargetPercent(),
+                    LineFollower_RightTargetPercent());
+                /*
+                 * TA~TD仍按原换算比例累计“等效速度目标”，只用于和EA~ED
+                 * 对照；直接PWM模式不会用这些目标闭环调节。
+                 */
+                track_target_sum.ma +=
+                    (int32_t)LineFollower_RightTargetPercent() *
+                    (int32_t)SPEED_PI_COUNTS_PER_PERCENT;
+                track_target_sum.mb +=
+                    (int32_t)LineFollower_LeftTargetPercent() *
+                    (int32_t)SPEED_PI_COUNTS_PER_PERCENT;
+                track_target_sum.mc +=
+                    (int32_t)LineFollower_RightTargetPercent() *
+                    (int32_t)SPEED_PI_COUNTS_PER_PERCENT;
+                track_target_sum.md +=
+                    (int32_t)LineFollower_LeftTargetPercent() *
+                    (int32_t)SPEED_PI_COUNTS_PER_PERCENT;
+#endif
 
                 if (MotorProtection_Update(Timebase_Millis(),
                                            &encoder_delta)) {
