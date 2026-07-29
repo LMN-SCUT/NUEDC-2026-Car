@@ -6,15 +6,15 @@
 /**
  * @brief 初始化H60板载四路AT8236电机PWM。
  *
- * 约定MA/MB为左侧前后轮，MC/MD为右侧前后轮。初始化完成后所有PWM为0。
- * 本函数只配置板载固定电机引脚，不负责验证实物车轮安装方向。
+ * 按H60板背面接口布局与实车方向验证：MB/MD为左侧，MA/MC为右侧。
+ * 初始化完成后所有PWM为0；若实际排线交叉，仍需按实车位置重新核对。
  */
 void Motor_Init(void);
 
 /**
  * @brief 设置左右两侧电机的开环速度百分比。
- * @param left_percent 左侧MA、MB速度，范围-100~100。
- * @param right_percent 右侧MC、MD速度，范围-100~100。
+ * @param left_percent 左侧MB、MD速度，范围-100~100。
+ * @param right_percent 右侧MA、MC速度，范围-100~100。
  *
  * 正负号表示两个转动方向，绝对值表示PWM百分比。实际“正数是否前进”
  * 由四个MOTOR_*_INVERT配置决定，必须架空逐轮验证。
@@ -50,7 +50,7 @@ void Motor_Brake(void);
 
 /**
  * @brief 获取最近一次实际允许输出的左侧速度命令。
- * @return MA/MB速度百分比。安全模式或停车后返回0。
+ * @return 左侧MB/MD中绝对值较大的速度命令。停车后返回0。
  *
  * 主要供堵转保护判断当前是否确实要求左侧车轮转动。
  */
@@ -58,8 +58,17 @@ int16_t Motor_LeftCommand(void);
 
 /**
  * @brief 获取最近一次实际允许输出的右侧速度命令。
- * @return MC/MD速度百分比。安全模式或停车后返回0。
+ * @return 右侧MA/MC中绝对值较大的速度命令。停车后返回0。
  */
 int16_t Motor_RightCommand(void);
+
+/** @brief 获取MA当前PWM百分比命令，供逐轮堵转诊断。 */
+int16_t Motor_MACommand(void);
+/** @brief 获取MB当前PWM百分比命令，供逐轮堵转诊断。 */
+int16_t Motor_MBCommand(void);
+/** @brief 获取MC当前PWM百分比命令，供逐轮堵转诊断。 */
+int16_t Motor_MCCommand(void);
+/** @brief 获取MD当前PWM百分比命令，供逐轮堵转诊断。 */
+int16_t Motor_MDCommand(void);
 
 #endif

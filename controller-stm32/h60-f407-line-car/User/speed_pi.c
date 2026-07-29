@@ -105,8 +105,12 @@ void SpeedPI_SetSidePercentTargets(int16_t left_percent,
     int32_t right_target =
         (int32_t)((float)right_percent * SPEED_PI_COUNTS_PER_PERCENT);
 
-    SpeedPI_SetTargets(left_target, left_target,
-                       right_target, right_target);
+    /*
+     * H60板背面接口：左列为MB/MD，右列为MA/MC。
+     * 参数顺序为MA、MB、MC、MD，因此右、左、右、左交错写入。
+     */
+    SpeedPI_SetTargets(right_target, left_target,
+                       right_target, left_target);
 }
 /* 四个PI分别计算，最终只有Motor_SetWheelPercent负责写入硬件PWM。 */
 void SpeedPI_Update(const Encoder_Delta *measured)

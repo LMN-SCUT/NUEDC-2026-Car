@@ -138,6 +138,43 @@ static void send_track_test_frame(const Encoder_Delta *encoder_sum,
     HC05_SendInt32(speed->pwm_md);
     HC05_SendString("\r\n");
 }
+
+/*
+ * 堵转触发详情：MASK bit0~3对应MA~MD，P为最后100 ms脉冲，
+ * L为连续低脉冲窗口数，C为触发检查时的逐轮PWM命令。
+ */
+static void send_stall_detail(void)
+{
+    const MotorProtection_Status *stall = MotorProtection_GetStatus();
+
+    HC05_SendString("STALL_DETAIL,MASK=0x");
+    HC05_SendHex8(stall->stalled_mask);
+    HC05_SendString(",MA_P=");
+    HC05_SendInt32((int32_t)stall->pulses_ma);
+    HC05_SendString(",MB_P=");
+    HC05_SendInt32((int32_t)stall->pulses_mb);
+    HC05_SendString(",MC_P=");
+    HC05_SendInt32((int32_t)stall->pulses_mc);
+    HC05_SendString(",MD_P=");
+    HC05_SendInt32((int32_t)stall->pulses_md);
+    HC05_SendString(",MA_L=");
+    HC05_SendInt32((int32_t)stall->low_windows_ma);
+    HC05_SendString(",MB_L=");
+    HC05_SendInt32((int32_t)stall->low_windows_mb);
+    HC05_SendString(",MC_L=");
+    HC05_SendInt32((int32_t)stall->low_windows_mc);
+    HC05_SendString(",MD_L=");
+    HC05_SendInt32((int32_t)stall->low_windows_md);
+    HC05_SendString(",MA_C=");
+    HC05_SendInt32((int32_t)stall->command_ma);
+    HC05_SendString(",MB_C=");
+    HC05_SendInt32((int32_t)stall->command_mb);
+    HC05_SendString(",MC_C=");
+    HC05_SendInt32((int32_t)stall->command_mc);
+    HC05_SendString(",MD_C=");
+    HC05_SendInt32((int32_t)stall->command_md);
+    HC05_SendString("\r\n");
+}
 #endif
 
 /*
@@ -744,7 +781,7 @@ int main(void)
 
                 /*
                  * 串级控制：灰度PD只生成左右速度目标，四轮编码器PI才写PWM。
-                 * 左侧目标复制给MA/MB，右侧目标复制给MC/MD。
+                 * 实车左侧MB/MD共用左目标，右侧MA/MC共用右目标。
                  */
                 SpeedPI_SetSidePercentTargets(
                     LineFollower_LeftTargetPercent(),
@@ -760,6 +797,7 @@ int main(void)
 
                 if (MotorProtection_Update(Timebase_Millis(),
                                            &encoder_delta)) {
+                    send_stall_detail();
                     SpeedPI_Reset();
                     app_state = APP_ERROR;
                     HC05_SendString("STALL_OR_ENCODER_ERROR,STOP\r\n");
@@ -806,6 +844,9 @@ int main(void)
                     HC05_SendString(",I2C=");
                     HC05_SendInt32((int32_t)gray_i2c_error);
                     HC05_SendString("\r\n");
+                    if (MotorProtection_GetStatus()->stalled_mask != 0U) {
+                        send_stall_detail();
+                    }
                 }
                 break;
         }

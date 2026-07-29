@@ -4,6 +4,10 @@
 
 static int16_t left_command;
 static int16_t right_command;
+static int16_t ma_command;
+static int16_t mb_command;
+static int16_t mc_command;
+static int16_t md_command;
 
 #if APP_ENABLE_MOTORS
 static int16_t clamp_percent(int16_t value)
@@ -144,17 +148,22 @@ void Motor_Init(void)
 
     left_command = 0;
     right_command = 0;
+    ma_command = 0;
+    mb_command = 0;
+    mc_command = 0;
+    md_command = 0;
     Motor_Stop();
 }
 
 /*
- * 左右侧速度统一入口。MA/MB接收left_percent，MC/MD接收right_percent。
+ * 左右侧速度统一入口。按H60板背面布局和实车接线：
+ * MB/MD接收left_percent，MA/MC接收right_percent。
  * APP_ENABLE_MOTORS=0时仍会编译控制逻辑，但实际输出被强制保持为0。
  */
 void Motor_SetSidePercent(int16_t left_percent, int16_t right_percent)
 {
-    Motor_SetWheelPercent(left_percent, left_percent,
-                          right_percent, right_percent);
+    Motor_SetWheelPercent(right_percent, left_percent,
+                          right_percent, left_percent);
 }
 
 /*
@@ -170,12 +179,16 @@ void Motor_SetWheelPercent(int16_t ma_percent, int16_t mb_percent,
     mb_percent = clamp_percent(mb_percent);
     mc_percent = clamp_percent(mc_percent);
     md_percent = clamp_percent(md_percent);
-    left_command = (ma_percent >= 0 ? ma_percent : -ma_percent) >=
-                   (mb_percent >= 0 ? mb_percent : -mb_percent) ?
-                   ma_percent : mb_percent;
-    right_command = (mc_percent >= 0 ? mc_percent : -mc_percent) >=
-                    (md_percent >= 0 ? md_percent : -md_percent) ?
-                    mc_percent : md_percent;
+    ma_command = ma_percent;
+    mb_command = mb_percent;
+    mc_command = mc_percent;
+    md_command = md_percent;
+    left_command = (mb_percent >= 0 ? mb_percent : -mb_percent) >=
+                   (md_percent >= 0 ? md_percent : -md_percent) ?
+                   mb_percent : md_percent;
+    right_command = (ma_percent >= 0 ? ma_percent : -ma_percent) >=
+                    (mc_percent >= 0 ? mc_percent : -mc_percent) ?
+                    ma_percent : mc_percent;
     set_motor_channel(TIM1, &TIM1->CCR1, &TIM1->CCR2,
                       ma_percent, MOTOR_MA_INVERT);
     set_motor_channel(TIM1, &TIM1->CCR3, &TIM1->CCR4,
@@ -191,6 +204,10 @@ void Motor_SetWheelPercent(int16_t ma_percent, int16_t mb_percent,
     (void)md_percent;
     left_command = 0;
     right_command = 0;
+    ma_command = 0;
+    mb_command = 0;
+    mc_command = 0;
+    md_command = 0;
     Motor_Stop();
 #endif
 }
@@ -200,6 +217,10 @@ void Motor_Stop(void)
 {
     left_command = 0;
     right_command = 0;
+    ma_command = 0;
+    mb_command = 0;
+    mc_command = 0;
+    md_command = 0;
     TIM1->CCR1 = 0U;
     TIM1->CCR2 = 0U;
     TIM1->CCR3 = 0U;
@@ -229,14 +250,19 @@ void Motor_Brake(void)
 #endif
 }
 
-/* 返回当前左侧有效命令，堵转保护据此决定是否检查MA和MB。 */
+/* 返回当前左侧有效命令；H60实车左侧为MB（左后）和MD（左前）。 */
 int16_t Motor_LeftCommand(void)
 {
     return left_command;
 }
 
-/* 返回当前右侧有效命令，堵转保护据此决定是否检查MC和MD。 */
+/* 返回当前右侧有效命令；H60实车右侧为MA（右后）和MC（右前）。 */
 int16_t Motor_RightCommand(void)
 {
     return right_command;
 }
+
+int16_t Motor_MACommand(void) { return ma_command; }
+int16_t Motor_MBCommand(void) { return mb_command; }
+int16_t Motor_MCCommand(void) { return mc_command; }
+int16_t Motor_MDCommand(void) { return md_command; }

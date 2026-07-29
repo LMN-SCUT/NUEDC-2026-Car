@@ -60,8 +60,8 @@ int16_t LineFollower_RightTargetPercent(void)
 
 /*
  * 灰度外环只保存左右目标，最终PWM统一由四路编码器PI写入。
- * LINE_SWAP_SIDE_COMMANDS用于修正实车已经观测到的差速转向极性相反，
- * 放在统一出口处理可保证正常循迹、短时保持和丢线搜索一起修正。
+ * LINE_SWAP_SIDE_COMMANDS只保留为方向诊断开关；当前已按实车轮位正确映射，
+ * 正常值为0，不再使用左右交换掩盖轮组接线或软件映射错误。
  */
 static void set_side_targets(int16_t left_percent, int16_t right_percent)
 {

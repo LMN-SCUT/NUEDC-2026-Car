@@ -79,7 +79,7 @@
  * 说明当前实车的左右差速转向极性与软件初始约定相反。
  * 置1后统一交换灰度外环的左右命令，普通循迹和丢线搜索同时生效。
  */
-#define LINE_SWAP_SIDE_COMMANDS       1U
+#define LINE_SWAP_SIDE_COMMANDS       0U
 
 /*
  * 感为I2C八路灰度测试配置。
@@ -100,8 +100,8 @@
 #define HC05_TEST_STREAM_PERIOD_MS    1000U
 
 /*
- * 约定接线：MA=左前、MB=左后、MC=右前、MD=右后。
- * 架空逐轮验证后，只修改对应通道的反相宏。
+ * 实车接线位置：MA=右后、MB=左后、MC=右前、MD=左前。
+ * 因此左侧是MB/MD，右侧是MA/MC；架空逐轮验证后只修改对应反相宏。
  */
 #define MOTOR_MA_INVERT               1U
 #define MOTOR_MB_INVERT               0U
