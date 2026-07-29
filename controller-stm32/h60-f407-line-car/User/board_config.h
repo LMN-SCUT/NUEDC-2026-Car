@@ -21,11 +21,15 @@
  * 恢复为0，才能重新进入H题地图循迹。
  */
 #define APP_ENABLE_MOTORS             1U
+#define MOTOR_PWM_LIMIT_PERCENT       65
 #define APP_MOTOR_TEST_MODE           1U
 #define APP_FIXED_RIGHT_TURN_TEST_ENABLE 1U
-#define RIGHT_TURN_TEST_LEFT_PWM      65
-#define RIGHT_TURN_TEST_RIGHT_PWM     30
-#define RIGHT_TURN_TEST_REPORT_MS     200U
+#define RIGHT_TURN_KICK_MS            200U
+#define RIGHT_TURN_KICK_LEFT_PWM      65
+#define RIGHT_TURN_KICK_RIGHT_PWM     0
+#define RIGHT_TURN_ARC_LEFT_PWM       65
+#define RIGHT_TURN_ARC_RIGHT_PWM      20
+#define RIGHT_TURN_TEST_REPORT_MS     100U
 /*
  * H题循迹控制模式：
  * GRAY_PWM=灰度目标直接作为PWM；
@@ -158,7 +162,7 @@
  * 且连续5个检查窗口（500 ms）均满足条件，判定为堵转。
  * 每圈脉冲数尚未实测，正式运行前必须根据最低正常转速重新确认。
  */
-#define STALL_PROTECTION_ENABLE       1U
+#define STALL_PROTECTION_ENABLE       0U
 #define STALL_STARTUP_GRACE_MS        1000U
 #define STALL_COMMAND_MIN_PERCENT     15
 #define STALL_CHECK_PERIOD_MS         100U

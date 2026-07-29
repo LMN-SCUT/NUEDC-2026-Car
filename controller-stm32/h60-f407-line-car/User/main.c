@@ -311,8 +311,9 @@ int main(void)
     HC05_Init();
 #if APP_MOTOR_TEST_MODE
 #if APP_FIXED_RIGHT_TURN_TEST_ENABLE
-    HC05_SendString("\r\nFIXED RIGHT ARC TEST,ENCODER_PI=OFF,GROUND\r\n");
-    HC05_SendString("LEFT_MB_MD=65,RIGHT_MA_MC=30,DURATION=2S,PRESS KEY\r\n");
+    HC05_SendString("\r\nTWO_STAGE RIGHT ARC,ENCODER_PI=OFF,GROUND\r\n");
+    HC05_SendString("KICK_200MS=L65_R0,THEN=L65_R20,TOTAL=2S,PRESS KEY\r\n");
+    HC05_SendString("ENCODER=TELEMETRY_ONLY,NO_PI,NO_STALL_CONTROL\r\n");
 #elif ENCODER_PI_TEST_ENABLE
     HC05_SendString("\r\nENCODER PI TEST READY,LIFT WHEELS,PRESS KEY\r\n");
     HC05_SendString("TARGET=70 COUNTS/20MS,REPORT=200MS\r\n");
@@ -335,8 +336,14 @@ int main(void)
     Motor_Init();
     Motor_Stop();
     Encoder_Init();
+#if !APP_MOTOR_TEST_MODE
+    /*
+     * 固定右弧隔离测试不初始化速度PI和堵转状态机。
+     * 编码器硬件仍初始化，只允许读取、累计和串口回传，不存在反馈控制路径。
+     */
     SpeedPI_Init();
     MotorProtection_Init(Timebase_Millis());
+#endif
 #if APP_MOTOR_TEST_MODE
     /* 电机验证与灰度无关，跳过I2C握手，避免灰度未接时阻塞测试。 */
     gray_i2c_online = 0U;
@@ -398,7 +405,7 @@ int main(void)
 #endif
                     app_state = APP_RUNNING;
 #if APP_FIXED_RIGHT_TURN_TEST_ENABLE
-                    HC05_SendString("KEY_OK,RIGHT_ARC_65_30_START,2S\r\n");
+                    HC05_SendString("KEY_OK,TWO_STAGE_RIGHT_ARC_START,2S\r\n");
 #elif ENCODER_PI_TEST_ENABLE
                     HC05_SendString("KEY_OK,PI_CLOSED_LOOP_START,10S\r\n");
 #else
@@ -431,8 +438,8 @@ int main(void)
                     app_state = APP_FINISHED;
 #if APP_FIXED_RIGHT_TURN_TEST_ENABLE
                     /*
-                     * 编码器PI保持关闭，只记录65%/30%固定PWM下的实际轨迹
-                     * 和四轮计数，不能用编码器反向修改前后轮PWM。
+                     * 编码器PI保持关闭，只记录“两阶段减耦合”轨迹和四轮计数，
+                     * 不用编码器强制同侧前后轮计数一致。
                      */
                     HC05_SendString("RIGHT_ARC_FINAL,TMA=");
                     HC05_SendInt32(encoder_total_ma);
@@ -554,11 +561,18 @@ int main(void)
 
 #if APP_FIXED_RIGHT_TURN_TEST_ENABLE
                 /*
-                 * 固定圆弧隔离测试：左侧MB/MD为65%，右侧MA/MC为30%。
-                 * 不读取灰度、不运行PID，验证底盘能否向前并形成稳定右弧。
+                 * 两阶段减耦合测试：
+                 * 前200 ms左70%/右0%，先克服四轮横向静摩擦并建立偏航；
+                 * 随后左65%/右20%，让小车保持向前并继续右转。
+                 * 编码器PI关闭，不强制前后轮速度一致。
                  */
-                Motor_SetSidePercent(RIGHT_TURN_TEST_LEFT_PWM,
-                                     RIGHT_TURN_TEST_RIGHT_PWM);
+                if (run_time_ms < RIGHT_TURN_KICK_MS) {
+                    Motor_SetSidePercent(RIGHT_TURN_KICK_LEFT_PWM,
+                                         RIGHT_TURN_KICK_RIGHT_PWM);
+                } else {
+                    Motor_SetSidePercent(RIGHT_TURN_ARC_LEFT_PWM,
+                                         RIGHT_TURN_ARC_RIGHT_PWM);
+                }
 #elif ENCODER_PI_TEST_ENABLE
                 /*
                  * 闭环测试中PI是唯一PWM写入者：目标固定为每20 ms 70计数，

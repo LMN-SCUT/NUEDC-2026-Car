@@ -12,11 +12,15 @@ static int16_t md_command;
 #if APP_ENABLE_MOTORS
 static int16_t clamp_percent(int16_t value)
 {
-    if (value > 100) {
-        return 100;
+    /*
+     * 全局最终安全限幅。无论调用来自测试、灰度PD还是速度PI，
+     * 写入定时器前都不能超过board_config.h规定的绝对占空比上限。
+     */
+    if (value > MOTOR_PWM_LIMIT_PERCENT) {
+        return MOTOR_PWM_LIMIT_PERCENT;
     }
-    if (value < -100) {
-        return -100;
+    if (value < -MOTOR_PWM_LIMIT_PERCENT) {
+        return -MOTOR_PWM_LIMIT_PERCENT;
     }
     return value;
 }

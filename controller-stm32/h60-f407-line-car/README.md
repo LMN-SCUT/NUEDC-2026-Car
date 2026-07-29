@@ -1,5 +1,31 @@
 # STM32F407VET6 H题循迹初步工程
 
+## 当前两阶段右弧减耦合测试（2026-07-29）
+
+- 当前启用 `APP_MOTOR_TEST_MODE=1` 和
+  `APP_FIXED_RIGHT_TURN_TEST_ENABLE=1`，暂时不运行灰度循迹。
+- 按 PE1 的 K 键后总共运行 2 秒：前 200 ms 左侧 MB/MD 输出 65%、
+  右侧 MA/MC 输出 0%，先建立右偏航并克服四轮横向静摩擦；随后 1.8 秒
+  左侧输出 65%、右侧输出 20%，以向前右弧继续行驶。
+- `ENCODER_PI_TEST_ENABLE=0`、`APP_MOTOR_TEST_STALL_CHECK=0`。编码器仅把
+  `EMA~EMD` 和最终累计 `TMA~TMD` 回传到串口，不比较四轮计数、不修正
+  PWM，也不会因计数差异触发本测试停车。为进一步隔离影响，本测试固件
+  连速度 PI 和堵转状态机的初始化也不执行。
+- `STALL_PROTECTION_ENABLE=0`，当前全局取消堵转保护；`motor.c` 的最终
+  输出入口增加 `MOTOR_PWM_LIMIT_PERCENT=65` 硬限幅，任何测试、灰度或
+  PI 命令都不能越过 ±65%。
+- 串口每 100 ms 输出一次，便于看到 200 ms 助转阶段。启动横幅应为
+  `TWO_STAGE RIGHT ARC,ENCODER_PI=OFF,GROUND`，按键后应出现
+  `KEY_OK,TWO_STAGE_RIGHT_ARC_START,2S`；助转参数行应为
+  `KICK_200MS=L65_R0,THEN=L65_R20`，同时会明确输出
+  `ENCODER=TELEMETRY_ONLY,NO_PI,NO_STALL_CONTROL`。
+- 助转阶段预期左侧有效 CCR 约为 5200、右侧为 0；右弧阶段左侧约为
+  5200、右侧约为 1600（定时器 `ARR=7999`）。实际编码器数值允许前后轮
+  不一致，只用于观察有没有转动和机械负载变化。
+- 本策略只能减轻四轮刚性/摩擦耦合造成的转向不足，不能从软件上消除
+  车架、轮胎侧滑和电机个体差异。测试须在宽阔地面进行并准备随时断电。
+- Keil ARMCC 5.06 update 7 已全量编译：0 Error、0 Warning、Code=3896。
+
 ## 当前固定右弧隔离测试（2026-07-29）
 
 - 当前 `APP_MOTOR_TEST_MODE=1`、`APP_FIXED_RIGHT_TURN_TEST_ENABLE=1`，

@@ -2,6 +2,9 @@
 #include "board_config.h"
 #include "motor.h"
 
+static MotorProtection_Status protection_status;
+
+#if STALL_PROTECTION_ENABLE
 typedef struct {
     uint32_t pulses;
     uint8_t low_pulse_windows;
@@ -14,7 +17,6 @@ static Wheel_Protection md_protection;
 static uint32_t last_check_ms;
 static uint32_t grace_started_ms;
 static bool stall_latched;
-static MotorProtection_Status protection_status;
 
 /* 取编码器增量绝对值；堵转判断只关心是否运动，不依赖方向符号。 */
 static uint32_t pulse_magnitude(int32_t value)
@@ -59,6 +61,7 @@ static bool check_wheel(Wheel_Protection *wheel, bool should_move)
 
     return wheel->low_pulse_windows >= STALL_CONFIRM_WINDOWS;
 }
+#endif
 
 /*
  * 初始化堵转保护。stall_latched一旦置位，只能通过本接口或Reset显式清除；
@@ -72,6 +75,7 @@ void MotorProtection_Init(uint32_t now_ms)
 /* 新任务启动前清除全部窗口累计和锁存故障。 */
 void MotorProtection_Reset(uint32_t now_ms)
 {
+#if STALL_PROTECTION_ENABLE
     reset_wheel(&ma_protection);
     reset_wheel(&mb_protection);
     reset_wheel(&mc_protection);
@@ -92,6 +96,26 @@ void MotorProtection_Reset(uint32_t now_ms)
     protection_status.command_mc = 0;
     protection_status.command_md = 0;
     protection_status.stalled_mask = 0U;
+#else
+    /*
+     * 总开关关闭时不保留任何计数状态，也不进行停车动作。
+     * 仍把公开状态清零，便于调试器和串口明确看到保护未触发。
+     */
+    (void)now_ms;
+    protection_status.pulses_ma = 0U;
+    protection_status.pulses_mb = 0U;
+    protection_status.pulses_mc = 0U;
+    protection_status.pulses_md = 0U;
+    protection_status.low_windows_ma = 0U;
+    protection_status.low_windows_mb = 0U;
+    protection_status.low_windows_mc = 0U;
+    protection_status.low_windows_md = 0U;
+    protection_status.command_ma = 0;
+    protection_status.command_mb = 0;
+    protection_status.command_mc = 0;
+    protection_status.command_md = 0;
+    protection_status.stalled_mask = 0U;
+#endif
 }
 
 /*
