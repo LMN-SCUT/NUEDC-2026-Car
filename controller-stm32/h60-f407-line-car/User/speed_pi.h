@@ -37,6 +37,15 @@ void SpeedPI_Reset(void);
 void SpeedPI_SetTargets(int32_t ma, int32_t mb, int32_t mc, int32_t md);
 
 /**
+ * @brief 把灰度外环的左右速度百分比换算为四轮目标编码器计数。
+ *
+ * left_percent用于MA/MB，right_percent用于MC/MD。百分比在这里表示
+ * 相对速度目标而不是PWM，占空比仍由四路PI根据反馈分别计算。
+ */
+void SpeedPI_SetSidePercentTargets(int16_t left_percent,
+                                   int16_t right_percent);
+
+/**
  * @brief 根据最近20 ms的编码器增量执行一次四轮PI并更新PWM。
  * @param measured Encoder_ReadAndReset读取到的四路增量。
  */

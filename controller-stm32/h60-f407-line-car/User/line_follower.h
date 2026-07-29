@@ -20,14 +20,14 @@ typedef enum {
 void LineFollower_Init(void);
 
 /**
- * @brief 根据一帧八路灰度数据计算PD修正并输出左右电机命令。
+ * @brief 根据一帧八路灰度数据计算PD修正并生成左右目标速度百分比。
  * @param gray GraySensor_Read得到的数据，不可为NULL。
  * @return 当前循迹状态，主程序据此决定继续、完成或进入故障。
  *
  * 输入直接采用newgrey.c根据0xDD位图生成的黑线active_mask，不使用ADC阈值。
  * 普通黑线使用加权平均位置误差；偏移增大时提高增益并降低基础速度；
  * 启动前500 ms使用30%基础速度助推；6路以上见黑作为宽黑标志；
- * 持续丢线最终停车。
+ * 持续丢线时把目标速度置0。函数不直接写PWM，编码器PI是最终执行器。
  */
 LineFollower_Status LineFollower_Update(const GraySensor_Data *gray);
 
@@ -36,5 +36,17 @@ LineFollower_Status LineFollower_Update(const GraySensor_Data *gray);
  * @return 约-7~+7；负值表示黑线在车体左侧，正值表示在右侧。
  */
 float LineFollower_Error(void);
+
+/**
+ * @brief 读取灰度外环最近一次生成的左侧目标速度百分比。
+ *
+ * 该值是速度目标，不是PWM；主程序应交给SpeedPI_SetSidePercentTargets。
+ */
+int16_t LineFollower_LeftTargetPercent(void);
+
+/**
+ * @brief 读取灰度外环最近一次生成的右侧目标速度百分比。
+ */
+int16_t LineFollower_RightTargetPercent(void);
 
 #endif

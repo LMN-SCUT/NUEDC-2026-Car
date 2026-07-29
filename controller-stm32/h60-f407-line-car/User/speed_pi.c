@@ -93,6 +93,21 @@ void SpeedPI_SetTargets(int32_t ma, int32_t mb, int32_t mc, int32_t md)
     speed_status.target_md = md;
 }
 
+/*
+ * 将循迹外环的抽象百分比转换成每20 ms编码器计数。
+ * 当前换算系数来自40%落地约77~88计数的实测，只作为首轮低速标定值。
+ */
+void SpeedPI_SetSidePercentTargets(int16_t left_percent,
+                                   int16_t right_percent)
+{
+    int32_t left_target =
+        (int32_t)((float)left_percent * SPEED_PI_COUNTS_PER_PERCENT);
+    int32_t right_target =
+        (int32_t)((float)right_percent * SPEED_PI_COUNTS_PER_PERCENT);
+
+    SpeedPI_SetTargets(left_target, left_target,
+                       right_target, right_target);
+}
 /* 四个PI分别计算，最终只有Motor_SetWheelPercent负责写入硬件PWM。 */
 void SpeedPI_Update(const Encoder_Delta *measured)
 {

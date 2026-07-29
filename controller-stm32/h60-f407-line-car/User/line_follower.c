@@ -1,6 +1,5 @@
 #include "line_follower.h"
 #include "board_config.h"
-#include "motor.h"
 #include "timebase.h"
 
 static const int8_t sensor_weight[GRAY_SENSOR_COUNT] = {
@@ -12,6 +11,8 @@ static float current_error;
 static uint8_t lost_frames;
 static uint8_t line_seen;
 static uint32_t boost_started_ms;
+static int16_t left_target_percent;
+static int16_t right_target_percent;
 
 static float absolute_value(float value)
 {
@@ -37,6 +38,8 @@ void LineFollower_Init(void)
     lost_frames = 0U;
     line_seen = 0U;
     boost_started_ms = Timebase_Millis();
+    left_target_percent = 0;
+    right_target_percent = 0;
 }
 
 /* 供主程序和Keil Watch读取最近一次位置误差。 */
@@ -45,14 +48,31 @@ float LineFollower_Error(void)
     return current_error;
 }
 
+int16_t LineFollower_LeftTargetPercent(void)
+{
+    return left_target_percent;
+}
+
+int16_t LineFollower_RightTargetPercent(void)
+{
+    return right_target_percent;
+}
+
+/* 灰度外环只保存左右目标，最终PWM统一由四路编码器PI写入。 */
+static void set_side_targets(int16_t left_percent, int16_t right_percent)
+{
+    left_target_percent = left_percent;
+    right_target_percent = right_percent;
+}
+
 /*
  * 循迹控制主接口：
  * 1. 全白时分阶段执行短时保持、定向搜索、超时停车；
- * 2. 六路以上见黑时作为宽线状态低速直行；当前30秒测试模式不会据此停车；
+ * 2. 六路以上见黑时作为A点横线候选，外环低速直行，是否到终点由main门控；
  * 3. 普通纵线直接使用newgrey.c由0xDD生成的active_mask，不再做ADC阈值判断；
  * 4. S1~S8默认按车体从左到右排列，权重为-7,-5,-3,-1,+1,+3,+5,+7；
  * 5. 按见黑探头的权重平均值计算位置误差，再分段调整PD增益和基础速度；
- * 6. 最终调用Motor_SetSidePercent输出左右差速。
+ * 6. 最终保存左右目标速度，交由主程序的四路编码器PI输出PWM。
  */
 LineFollower_Status LineFollower_Update(const GraySensor_Data *gray)
 {
@@ -67,7 +87,7 @@ LineFollower_Status LineFollower_Update(const GraySensor_Data *gray)
     int16_t right_speed;
 
     if (gray == 0) {
-        Motor_Stop();
+        set_side_targets(0, 0);
         return LINE_ADC_ERROR;
     }
 
@@ -78,7 +98,7 @@ LineFollower_Status LineFollower_Update(const GraySensor_Data *gray)
 
         if ((line_seen == 0U) ||
             (lost_frames >= APP_LOST_STOP_FRAMES)) {
-            Motor_Stop();
+            set_side_targets(0, 0);
             return LINE_LOST_STOP;
         }
 
@@ -89,21 +109,21 @@ LineFollower_Status LineFollower_Update(const GraySensor_Data *gray)
             right_speed = clamp_speed(
                 (float)LINE_BASE_SPEED_PERCENT -
                 LINE_KP * current_error);
-            Motor_SetSidePercent(left_speed, right_speed);
+            set_side_targets(left_speed, right_speed);
         } else if (previous_error < 0.0f) {
-            Motor_SetSidePercent(-LINE_SEARCH_SPEED_PERCENT,
-                                  LINE_SEARCH_SPEED_PERCENT);
+            set_side_targets(-LINE_SEARCH_SPEED_PERCENT,
+                             LINE_SEARCH_SPEED_PERCENT);
         } else {
-            Motor_SetSidePercent(LINE_SEARCH_SPEED_PERCENT,
-                                 -LINE_SEARCH_SPEED_PERCENT);
+            set_side_targets(LINE_SEARCH_SPEED_PERCENT,
+                             -LINE_SEARCH_SPEED_PERCENT);
         }
         return LINE_TEMPORARILY_LOST;
     }
 
     /*
      * A点横向启停线通常会让6路以上同时见黑。宽黑不是普通位置偏差：
-     * 当前30秒限时测试忽略A点启停线，因此这里只保持低速直行而不触发停车。
-     * 启动时也能以低速直行离开A点，避免全黑平均值掩盖特殊标志。
+     * 本函数只保持低速直行并报告LINE_WIDE_MARKER，不自行决定启停。
+     * main.c负责“先离开起点A、运行至少5秒、再次遇A才停车”的门控。
      */
     if (gray->active_count >= LINE_WIDE_ACTIVE_MIN) {
         int16_t wide_speed = LINE_WIDE_SPEED_PERCENT;
@@ -115,7 +135,7 @@ LineFollower_Status LineFollower_Update(const GraySensor_Data *gray)
             LINE_START_BOOST_MS) {
             wide_speed = LINE_START_BOOST_PERCENT;
         }
-        Motor_SetSidePercent(wide_speed, wide_speed);
+        set_side_targets(wide_speed, wide_speed);
         return LINE_WIDE_MARKER;
     }
 
@@ -147,8 +167,8 @@ LineFollower_Status LineFollower_Update(const GraySensor_Data *gray)
     }
 
     /*
-     * 启动后的前500 ms提高基础占空比到30%，用于克服静摩擦和电机死区。
-     * 只提高基础前进量，位置PD修正仍然有效，500 ms后自动恢复分段速度。
+     * 启动后的前500 ms把基础速度目标提高到30%，用于克服静摩擦和电机死区。
+     * 该数值不再直接等于PWM；四轮PI会根据编码器反馈计算实际占空比。
      */
     if ((uint32_t)(Timebase_Millis() - boost_started_ms) <
         LINE_START_BOOST_MS) {
@@ -164,6 +184,6 @@ LineFollower_Status LineFollower_Update(const GraySensor_Data *gray)
         (float)base_speed + correction);
     right_speed = clamp_speed(
         (float)base_speed - correction);
-    Motor_SetSidePercent(left_speed, right_speed);
+    set_side_targets(left_speed, right_speed);
     return LINE_TRACKING;
 }

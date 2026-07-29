@@ -16,11 +16,11 @@
  */
 
 /*
- * 当前启用独立电机方向验证模式：必须先将四个车轮架空。
- * 正式循迹前关闭APP_MOTOR_TEST_MODE，再单独决定是否保留电机输出。
+ * 当前启用H题地图循迹正式测试分支，APP_MOTOR_TEST_MODE=0。
+ * 如需重新做四轮架空/编码器PI隔离测试，再临时改为1。
  */
 #define APP_ENABLE_MOTORS             1U
-#define APP_MOTOR_TEST_MODE           1U
+#define APP_MOTOR_TEST_MODE           0U
 #define APP_MOTOR_TEST_PERCENT        40
 #define APP_MOTOR_TEST_MS             10000U
 #define APP_MOTOR_TEST_STALL_CHECK    0U
@@ -41,11 +41,16 @@
 #define SPEED_PI_KP                   0.12f
 #define SPEED_PI_KI                   0.015f
 #define SPEED_PI_FEEDFORWARD_PERCENT_PER_COUNT 0.48f
+#define SPEED_PI_COUNTS_PER_PERCENT  2.0f
 #define SPEED_PI_INTEGRAL_LIMIT_PERCENT 20.0f
 #define SPEED_PI_PWM_LIMIT_PERCENT    60.0f
 
 #define APP_CONTROL_PERIOD_MS         20U
 #define APP_TIMED_RUN_MS              30000U
+#define APP_FINISH_MIN_MS             5000U
+#define APP_START_MARKER_CLEAR_FRAMES 5U
+#define APP_FINISH_MARKER_FRAMES      3U
+#define APP_TRACK_REPORT_MS           500U
 #define APP_LOST_CONFIRM_FRAMES       3U
 #define APP_LOST_STOP_FRAMES          50U
 

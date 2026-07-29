@@ -28,6 +28,8 @@ volatile uint8_t gray_i2c_online;
 volatile float line_error;
 volatile Encoder_Delta encoder_delta_debug;
 volatile LineFollower_Status line_status;
+volatile uint8_t track_finish_armed;
+volatile uint8_t track_finish_detected;
 
 #if APP_MOTOR_TEST_MODE && ENCODER_PI_TEST_ENABLE
 /* 判断10秒累计速度是否落在目标的±10%内，只作为闭环初步验收标准。 */
@@ -36,6 +38,55 @@ static uint8_t pi_total_within_10_percent(int32_t actual, int32_t target)
     int32_t minimum = (target * 90) / 100;
     int32_t maximum = (target * 110) / 100;
     return ((actual >= minimum) && (actual <= maximum)) ? 1U : 0U;
+}
+#endif
+
+/*
+ * H题地图循迹遥测：
+ * D/B/N是灰度原始白位图、黑线位图和见黑数量；E是位置误差x100；
+ * ST是循迹状态；ARM表示已离开起点A横线；LT/RT是灰度外环目标百分比；
+ * EA~ED是本20 ms编码器计数；PA~PD是四路速度PI输出PWM百分比。
+ */
+#if !APP_MOTOR_TEST_MODE
+static void send_track_test_frame(const Encoder_Delta *delta)
+{
+    const SpeedPI_Status *speed = SpeedPI_GetStatus();
+
+    HC05_SendString("MAP,MS=");
+    HC05_SendInt32((int32_t)run_time_ms);
+    HC05_SendString(",D=0x");
+    HC05_SendHex8(gray_i2c_raw_mask);
+    HC05_SendString(",B=0x");
+    HC05_SendHex8(gray_active_mask);
+    HC05_SendString(",N=");
+    HC05_SendInt32((int32_t)gray_active_count);
+    HC05_SendString(",E=");
+    HC05_SendInt32((int32_t)(line_error * 100.0f));
+    HC05_SendString(",ST=");
+    HC05_SendInt32((int32_t)line_status);
+    HC05_SendString(",ARM=");
+    HC05_SendInt32((int32_t)track_finish_armed);
+    HC05_SendString(",LT=");
+    HC05_SendInt32((int32_t)LineFollower_LeftTargetPercent());
+    HC05_SendString(",RT=");
+    HC05_SendInt32((int32_t)LineFollower_RightTargetPercent());
+    HC05_SendString(",EA=");
+    HC05_SendInt32(delta->ma);
+    HC05_SendString(",EB=");
+    HC05_SendInt32(delta->mb);
+    HC05_SendString(",EC=");
+    HC05_SendInt32(delta->mc);
+    HC05_SendString(",ED=");
+    HC05_SendInt32(delta->md);
+    HC05_SendString(",PA=");
+    HC05_SendInt32(speed->pwm_ma);
+    HC05_SendString(",PB=");
+    HC05_SendInt32(speed->pwm_mb);
+    HC05_SendString(",PC=");
+    HC05_SendInt32(speed->pwm_mc);
+    HC05_SendString(",PD=");
+    HC05_SendInt32(speed->pwm_md);
+    HC05_SendString("\r\n");
 }
 #endif
 
@@ -131,6 +182,9 @@ int main(void)
     uint32_t run_started_ms = 0U;
 #if !APP_MOTOR_TEST_MODE
     GraySensor_Data gray;
+    uint32_t last_track_report_ms = 0U;
+    uint8_t start_marker_clear_frames = 0U;
+    uint8_t finish_marker_frames = 0U;
 #endif
     Encoder_Delta encoder_delta;
 
@@ -146,7 +200,8 @@ int main(void)
 #endif
     HC05_SendString("OK bits: bit0=MA,bit1=MB,bit2=MC,bit3=MD\r\n");
 #else
-    HC05_SendString("\r\nSTM32F407 8CH GRAY 115200\r\n");
+    HC05_SendString("\r\nH60 H-MAP TRACK,GRAY+ENCODER_PI,115200\r\n");
+    HC05_SendString("START AT A,FACE A->B,CLOCKWISE\r\n");
 #endif
     Key_Init();
     Motor_Init();
@@ -511,13 +566,20 @@ int main(void)
 
         switch (app_state) {
             case APP_WAIT_START:
-                Motor_Stop();
+                SpeedPI_Reset();
                 run_time_ms = 0U;
+                track_finish_armed = 0U;
+                track_finish_detected = 0U;
+                start_marker_clear_frames = 0U;
+                finish_marker_frames = 0U;
                 if (Key_StartPressedEvent() != 0U) {
                     run_started_ms = Timebase_Millis();
                     LineFollower_Init();
+                    SpeedPI_Reset();
                     MotorProtection_Reset(Timebase_Millis());
                     app_state = APP_RUNNING;
+                    last_track_report_ms = run_started_ms;
+                    HC05_SendString("KEY_OK,MAP_RUN_START\r\n");
                 }
                 break;
 
@@ -530,8 +592,10 @@ int main(void)
                  * 从按键确认启动的时刻计时，达到30秒立即主动短刹车并锁定停止。
                  */
                 if (run_time_ms >= APP_TIMED_RUN_MS) {
+                    SpeedPI_Reset();
                     Motor_Brake();
                     app_state = APP_FINISHED;
+                    HC05_SendString("TIMEOUT_30S,BRAKE\r\n");
                     break;
                 }
 
@@ -539,15 +603,72 @@ int main(void)
                 line_error = LineFollower_Error();
                 if ((line_status == LINE_ADC_ERROR) ||
                     (line_status == LINE_LOST_STOP)) {
-                    Motor_Stop();
+                    SpeedPI_Reset();
                     app_state = APP_ERROR;
+                    HC05_SendString("LINE_OR_I2C_ERROR,STOP\r\n");
                     break;
                 }
 
+                /*
+                 * A点横向线状态机：
+                 * 启动时车就在A横线上，必须先连续5帧离开宽黑才允许判终点；
+                 * 运行至少5秒后再次连续3帧见宽黑，判定完成一圈并主动制动。
+                 * 最小时间门控可过滤启动横线和近距离宽黑抖动。
+                 */
+                if (line_status != LINE_WIDE_MARKER) {
+                    finish_marker_frames = 0U;
+                    if (track_finish_armed == 0U) {
+                        if (start_marker_clear_frames <
+                            APP_START_MARKER_CLEAR_FRAMES) {
+                            start_marker_clear_frames++;
+                        }
+                        if (start_marker_clear_frames >=
+                            APP_START_MARKER_CLEAR_FRAMES) {
+                            track_finish_armed = 1U;
+                            HC05_SendString("A_MARKER_LEFT,FINISH_ARMED\r\n");
+                        }
+                    }
+                } else if ((track_finish_armed != 0U) &&
+                           (run_time_ms >= APP_FINISH_MIN_MS)) {
+                    if (finish_marker_frames <
+                        APP_FINISH_MARKER_FRAMES) {
+                        finish_marker_frames++;
+                    }
+                    if (finish_marker_frames >=
+                        APP_FINISH_MARKER_FRAMES) {
+                        track_finish_detected = 1U;
+                        SpeedPI_Reset();
+                        Motor_Brake();
+                        app_state = APP_FINISHED;
+                        HC05_SendString("A_FINISH_DETECTED,MS=");
+                        HC05_SendInt32((int32_t)run_time_ms);
+                        HC05_SendString(",BRAKE\r\n");
+                        break;
+                    }
+                }
+
+                /*
+                 * 串级控制：灰度PD只生成左右速度目标，四轮编码器PI才写PWM。
+                 * 左侧目标复制给MA/MB，右侧目标复制给MC/MD。
+                 */
+                SpeedPI_SetSidePercentTargets(
+                    LineFollower_LeftTargetPercent(),
+                    LineFollower_RightTargetPercent());
+                SpeedPI_Update(&encoder_delta);
+
                 if (MotorProtection_Update(Timebase_Millis(),
                                            &encoder_delta)) {
-                    Motor_Stop();
+                    SpeedPI_Reset();
                     app_state = APP_ERROR;
+                    HC05_SendString("STALL_OR_ENCODER_ERROR,STOP\r\n");
+                    break;
+                }
+
+                if ((uint32_t)(Timebase_Millis() -
+                               last_track_report_ms) >=
+                    APP_TRACK_REPORT_MS) {
+                    last_track_report_ms = Timebase_Millis();
+                    send_track_test_frame(&encoder_delta);
                 }
                 break;
 
@@ -557,7 +678,7 @@ int main(void)
 
             case APP_ERROR:
             default:
-                Motor_Stop();
+                SpeedPI_Reset();
                 break;
         }
 #endif
