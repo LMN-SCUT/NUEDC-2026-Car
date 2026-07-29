@@ -1,0 +1,119 @@
+#include "speed_pi.h"
+#include "board_config.h"
+#include "motor.h"
+
+typedef struct {
+    float integral;
+} WheelPI;
+
+static WheelPI pi_ma;
+static WheelPI pi_mb;
+static WheelPI pi_mc;
+static WheelPI pi_md;
+static SpeedPI_Status speed_status;
+
+static float clamp_float(float value, float minimum, float maximum)
+{
+    if (value > maximum) {
+        return maximum;
+    }
+    if (value < minimum) {
+        return minimum;
+    }
+    return value;
+}
+
+/*
+ * 单轮速度PI：
+ * 1. 前馈项根据目标计数直接给出接近工作点的PWM，减少纯积分慢慢爬升。
+ * 2. P项修正当前20 ms速度误差。
+ * 3. I项补偿电池电压、地面阻力和四个电机的长期差异。
+ * 4. 积分及最终PWM均限幅，避免堵转时无限累积。
+ */
+static int16_t update_one_wheel(WheelPI *pi, int32_t target,
+                                int32_t measured)
+{
+    float error;
+    float feedforward;
+    float output;
+
+    if (target == 0) {
+        pi->integral = 0.0f;
+        return 0;
+    }
+
+    error = (float)(target - measured);
+    pi->integral += SPEED_PI_KI * error;
+    pi->integral = clamp_float(pi->integral,
+                               -SPEED_PI_INTEGRAL_LIMIT_PERCENT,
+                               SPEED_PI_INTEGRAL_LIMIT_PERCENT);
+
+    feedforward = SPEED_PI_FEEDFORWARD_PERCENT_PER_COUNT *
+                  (float)target;
+    output = feedforward + SPEED_PI_KP * error + pi->integral;
+    output = clamp_float(output, -SPEED_PI_PWM_LIMIT_PERCENT,
+                         SPEED_PI_PWM_LIMIT_PERCENT);
+
+    if (output >= 0.0f) {
+        return (int16_t)(output + 0.5f);
+    }
+    return (int16_t)(output - 0.5f);
+}
+
+/* 初始化只建立软件状态，不配置GPIO；PWM硬件仍由Motor_Init负责。 */
+void SpeedPI_Init(void)
+{
+    SpeedPI_Reset();
+}
+
+/* 停车时同时清空积分，保证下一次启动不会带着旧PWM补偿。 */
+void SpeedPI_Reset(void)
+{
+    pi_ma.integral = 0.0f;
+    pi_mb.integral = 0.0f;
+    pi_mc.integral = 0.0f;
+    pi_md.integral = 0.0f;
+    speed_status.target_ma = 0;
+    speed_status.target_mb = 0;
+    speed_status.target_mc = 0;
+    speed_status.target_md = 0;
+    speed_status.pwm_ma = 0;
+    speed_status.pwm_mb = 0;
+    speed_status.pwm_mc = 0;
+    speed_status.pwm_md = 0;
+    Motor_Stop();
+}
+
+/* 设置目标不会立即写PWM；下一次SpeedPI_Update才使用最新编码器反馈。 */
+void SpeedPI_SetTargets(int32_t ma, int32_t mb, int32_t mc, int32_t md)
+{
+    speed_status.target_ma = ma;
+    speed_status.target_mb = mb;
+    speed_status.target_mc = mc;
+    speed_status.target_md = md;
+}
+
+/* 四个PI分别计算，最终只有Motor_SetWheelPercent负责写入硬件PWM。 */
+void SpeedPI_Update(const Encoder_Delta *measured)
+{
+    if (measured == 0) {
+        return;
+    }
+
+    speed_status.pwm_ma =
+        update_one_wheel(&pi_ma, speed_status.target_ma, measured->ma);
+    speed_status.pwm_mb =
+        update_one_wheel(&pi_mb, speed_status.target_mb, measured->mb);
+    speed_status.pwm_mc =
+        update_one_wheel(&pi_mc, speed_status.target_mc, measured->mc);
+    speed_status.pwm_md =
+        update_one_wheel(&pi_md, speed_status.target_md, measured->md);
+
+    Motor_SetWheelPercent(speed_status.pwm_ma, speed_status.pwm_mb,
+                          speed_status.pwm_mc, speed_status.pwm_md);
+}
+
+const SpeedPI_Status *SpeedPI_GetStatus(void)
+{
+    return &speed_status;
+}
