@@ -1,272 +1,170 @@
 #include "motor.h"
-#include "board_config.h"
+#include "board.h"
 #include "stm32f4xx.h"
+#include "timebase.h"
 
-static int16_t left_command;
-static int16_t right_command;
-static int16_t ma_command;
-static int16_t mb_command;
-static int16_t mc_command;
-static int16_t md_command;
+static uint16_t left_duty;
+static uint16_t right_duty;
+static int8_t left_direction;
+static int8_t right_direction;
 
-#if APP_ENABLE_MOTORS
-static int16_t clamp_percent(int16_t value)
+static void PwmChannel_Init(TIM_TypeDef *timer, uint8_t channel)
 {
-    /*
-     * 全局最终安全限幅。无论调用来自测试、灰度PD还是速度PI，
-     * 写入定时器前都不能超过board_config.h规定的绝对占空比上限。
-     */
-    if (value > MOTOR_PWM_LIMIT_PERCENT) {
-        return MOTOR_PWM_LIMIT_PERCENT;
-    }
-    if (value < -MOTOR_PWM_LIMIT_PERCENT) {
-        return -MOTOR_PWM_LIMIT_PERCENT;
-    }
-    return value;
+    TIM_OCInitTypeDef oc;
+    TIM_OCStructInit(&oc);
+    oc.TIM_OCMode = TIM_OCMode_PWM1;
+    oc.TIM_OutputState = TIM_OutputState_Enable;
+    oc.TIM_Pulse = 0U;
+    oc.TIM_OCPolarity = TIM_OCPolarity_High;
+    if (channel == 1U) TIM_OC1Init(timer, &oc);
+    if (channel == 2U) TIM_OC2Init(timer, &oc);
+    if (channel == 3U) TIM_OC3Init(timer, &oc);
+    if (channel == 4U) TIM_OC4Init(timer, &oc);
 }
 
-static uint32_t percent_to_compare(int16_t percent, uint32_t period)
-{
-    uint32_t magnitude;
-    if (percent < 0) {
-        percent = (int16_t)-percent;
-    }
-    magnitude = (uint32_t)percent;
-    return ((period + 1U) * magnitude) / 100U;
-}
-#endif
-
-static void gpio_set_af(GPIO_TypeDef *port, uint32_t pin,
-                        uint32_t alternate_function)
-{
-    uint32_t shift = pin * 2U;
-    uint32_t afr_index = pin >> 3U;
-    uint32_t afr_shift = (pin & 7U) * 4U;
-
-    port->MODER = (port->MODER & ~(3UL << shift)) | (2UL << shift);
-    port->OTYPER &= ~(1UL << pin);
-    port->OSPEEDR |= (3UL << shift);
-    port->PUPDR &= ~(3UL << shift);
-    port->AFR[afr_index] =
-        (port->AFR[afr_index] & ~(15UL << afr_shift)) |
-        (alternate_function << afr_shift);
-}
-
-static void timer_pwm_common(TIM_TypeDef *timer, uint32_t period)
-{
-    timer->CR1 = 0U;
-    timer->PSC = 0U;
-    timer->ARR = period;
-    timer->EGR = TIM_EGR_UG;
-}
-
-#if APP_ENABLE_MOTORS
-/*
- * 控制AT8236的一个电机通道：
- * 正转时IN1输出PWM、IN2为0；反转时IN1为0、IN2输出PWM；0命令时双低。
- */
-static void set_motor_channel(TIM_TypeDef *timer,
-                              volatile uint32_t *input1_compare,
-                              volatile uint32_t *input2_compare,
-                              int16_t percent, uint8_t invert)
-{
-    uint32_t compare;
-
-    percent = clamp_percent(percent);
-    if (invert != 0U) {
-        percent = (int16_t)-percent;
-    }
-
-    compare = percent_to_compare(percent, timer->ARR);
-    if (percent > 0) {
-        *input1_compare = compare;
-        *input2_compare = 0U;
-    } else if (percent < 0) {
-        *input1_compare = 0U;
-        *input2_compare = compare;
-    } else {
-        *input1_compare = 0U;
-        *input2_compare = 0U;
-    }
-}
-#endif
-
-/*
- * 初始化H60四个板载电机接口：
- * MA/MB使用TIM1，MC使用TIM9，MD使用TIM12，PWM目标频率2 kHz。
- * 2 kHz与已成功运行的H60参考工程一致，也便于当前阶段测量PWM平均电压。
- * 初始化结束后立即Motor_Stop，避免上电误动作。
- */
 void Motor_Init(void)
 {
-    uint32_t period;
+    GPIO_InitTypeDef gpio;
+    TIM_TimeBaseInitTypeDef time;
 
-    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOBEN | RCC_AHB1ENR_GPIOEEN;
-    RCC->APB2ENR |= RCC_APB2ENR_TIM1EN | RCC_APB2ENR_TIM9EN;
-    RCC->APB1ENR |= RCC_APB1ENR_TIM12EN;
-    (void)RCC->AHB1ENR;
+    RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOB | RCC_AHB1Periph_GPIOE, ENABLE);
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM1 | RCC_APB2Periph_TIM9, ENABLE);
+    RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM12, ENABLE);
 
-    /* MA/MB: TIM1 AF1 */
-    gpio_set_af(GPIOE, 9U, 1U);
-    gpio_set_af(GPIOE, 11U, 1U);
-    gpio_set_af(GPIOE, 13U, 1U);
-    gpio_set_af(GPIOE, 14U, 1U);
-    /* MC: TIM9 AF3 */
-    gpio_set_af(GPIOE, 5U, 3U);
-    gpio_set_af(GPIOE, 6U, 3U);
-    /* MD: TIM12 AF9 */
-    gpio_set_af(GPIOB, 14U, 9U);
-    gpio_set_af(GPIOB, 15U, 9U);
+    GPIO_PinAFConfig(GPIOE, GPIO_PinSource9, GPIO_AF_TIM1);
+    GPIO_PinAFConfig(GPIOE, GPIO_PinSource11, GPIO_AF_TIM1);
+    GPIO_PinAFConfig(GPIOE, GPIO_PinSource13, GPIO_AF_TIM1);
+    GPIO_PinAFConfig(GPIOE, GPIO_PinSource14, GPIO_AF_TIM1);
+    GPIO_PinAFConfig(GPIOE, GPIO_PinSource5, GPIO_AF_TIM9);
+    GPIO_PinAFConfig(GPIOE, GPIO_PinSource6, GPIO_AF_TIM9);
+    GPIO_PinAFConfig(GPIOB, GPIO_PinSource14, GPIO_AF_TIM12);
+    GPIO_PinAFConfig(GPIOB, GPIO_PinSource15, GPIO_AF_TIM12);
 
-    period = (SystemCoreClock / MOTOR_PWM_FREQUENCY_HZ) - 1U;
+    GPIO_StructInit(&gpio);
+    gpio.GPIO_Mode = GPIO_Mode_AF;
+    gpio.GPIO_OType = GPIO_OType_PP;
+    gpio.GPIO_PuPd = GPIO_PuPd_NOPULL;
+    gpio.GPIO_Speed = GPIO_Speed_50MHz;
+    gpio.GPIO_Pin = GPIO_Pin_5 | GPIO_Pin_6 | GPIO_Pin_9 |
+                    GPIO_Pin_11 | GPIO_Pin_13 | GPIO_Pin_14;
+    GPIO_Init(GPIOE, &gpio);
+    gpio.GPIO_Pin = GPIO_Pin_14 | GPIO_Pin_15;
+    GPIO_Init(GPIOB, &gpio);
 
-    timer_pwm_common(TIM1, period);
-    TIM1->CCMR1 = TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1M_2 |
-                  TIM_CCMR1_OC1PE |
-                  TIM_CCMR1_OC2M_1 | TIM_CCMR1_OC2M_2 |
-                  TIM_CCMR1_OC2PE;
-    TIM1->CCMR2 = TIM_CCMR2_OC3M_1 | TIM_CCMR2_OC3M_2 |
-                  TIM_CCMR2_OC3PE |
-                  TIM_CCMR2_OC4M_1 | TIM_CCMR2_OC4M_2 |
-                  TIM_CCMR2_OC4PE;
-    TIM1->CCER = TIM_CCER_CC1E | TIM_CCER_CC2E |
-                 TIM_CCER_CC3E | TIM_CCER_CC4E;
-    TIM1->BDTR = TIM_BDTR_MOE;
-    TIM1->CR1 = TIM_CR1_ARPE | TIM_CR1_CEN;
+    TIM_TimeBaseStructInit(&time);
+    time.TIM_CounterMode = TIM_CounterMode_Up;
+    time.TIM_Period = MOTOR_PWM_TOP;
+    time.TIM_Prescaler = 83U;  /* TIM1/TIM9: 168 MHz /84 /1000 = 2 kHz */
+    TIM_TimeBaseInit(TIM1, &time);
+    TIM_TimeBaseInit(TIM9, &time);
+    time.TIM_Prescaler = 41U;  /* TIM12: 84 MHz /42 /1000 = 2 kHz */
+    TIM_TimeBaseInit(TIM12, &time);
 
-    timer_pwm_common(TIM9, period);
-    TIM9->CCMR1 = TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1M_2 |
-                  TIM_CCMR1_OC1PE |
-                  TIM_CCMR1_OC2M_1 | TIM_CCMR1_OC2M_2 |
-                  TIM_CCMR1_OC2PE;
-    TIM9->CCER = TIM_CCER_CC1E | TIM_CCER_CC2E;
-    TIM9->CR1 = TIM_CR1_ARPE | TIM_CR1_CEN;
+    PwmChannel_Init(TIM1, 1U);
+    PwmChannel_Init(TIM1, 2U);
+    PwmChannel_Init(TIM1, 3U);
+    PwmChannel_Init(TIM1, 4U);
+    PwmChannel_Init(TIM9, 1U);
+    PwmChannel_Init(TIM9, 2U);
+    PwmChannel_Init(TIM12, 1U);
+    PwmChannel_Init(TIM12, 2U);
+    TIM_CtrlPWMOutputs(TIM1, ENABLE);
+    TIM_Cmd(TIM1, ENABLE);
+    TIM_Cmd(TIM9, ENABLE);
+    TIM_Cmd(TIM12, ENABLE);
+    Motor_StopAll();
+}
 
-    timer_pwm_common(TIM12, period);
-    TIM12->CCMR1 = TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1M_2 |
-                   TIM_CCMR1_OC1PE |
-                   TIM_CCMR1_OC2M_1 | TIM_CCMR1_OC2M_2 |
-                   TIM_CCMR1_OC2PE;
-    TIM12->CCER = TIM_CCER_CC1E | TIM_CCER_CC2E;
-    TIM12->CR1 = TIM_CR1_ARPE | TIM_CR1_CEN;
-
-    left_command = 0;
-    right_command = 0;
-    ma_command = 0;
-    mb_command = 0;
-    mc_command = 0;
-    md_command = 0;
-    Motor_Stop();
+static uint16_t SpeedToDuty(float speed)
+{
+    float magnitude = (speed < 0.0f) ? -speed : speed;
+    uint16_t duty;
+    if (magnitude > TRACK_MAX_SPEED) magnitude = TRACK_MAX_SPEED;
+    duty = (uint16_t)(magnitude * (float)MOTOR_PWM_TOP / TRACK_MAX_SPEED);
+    if ((duty < TRACK_MIN_DUTY) && (magnitude > 1.0f)) duty = TRACK_MIN_DUTY;
+    return duty;
 }
 
 /*
- * 左右侧速度统一入口。按H60板背面布局和实车接线：
- * MB/MD接收left_percent，MA/MC接收right_percent。
- * APP_ENABLE_MOTORS=0时仍会编译控制逻辑，但实际输出被强制保持为0。
+ * 物理轮位（用户实机确认）：
+ * MA=右后(TIM1 CH1/2)，MB=左后(TIM1 CH3/4)，
+ * MC=右前(TIM9 CH1/2)，MD=左前(TIM12 CH1/2)。
+ * 前进电平（用户实机确认）：MA2、MB1、MC2、MD1 输出 PWM。
  */
-void Motor_SetSidePercent(int16_t left_percent, int16_t right_percent)
+void Motor_SetSides(float left_speed, float right_speed)
 {
-    Motor_SetWheelPercent(right_percent, left_percent,
-                          right_percent, left_percent);
+    uint16_t left = SpeedToDuty(left_speed);
+    uint16_t right = SpeedToDuty(right_speed);
+    int8_t next_left_direction;
+    int8_t next_right_direction;
+    uint8_t direction_changed;
+
+    next_left_direction =
+        (left == 0U) ? 0 : ((left_speed >= 0.0f) ? 1 : -1);
+    next_right_direction =
+        (right == 0U) ? 0 : ((right_speed >= 0.0f) ? 1 : -1);
+    direction_changed = 0U;
+    if ((left_direction != 0) && (next_left_direction != 0) &&
+        (left_direction != next_left_direction)) {
+        direction_changed = 1U;
+    }
+    if ((right_direction != 0) && (next_right_direction != 0) &&
+        (right_direction != next_right_direction)) {
+        direction_changed = 1U;
+    }
+
+    left_duty = left;
+    right_duty = right;
+
+    /*
+     * 换向前先关闭每个 H 桥的正反两路，再打开目标方向。
+     * 这样从正转切到反转时不会在两次寄存器写入之间短暂同时导通。
+     */
+    TIM1->CCR1 = 0U; TIM1->CCR2 = 0U;   /* MA 右后 */
+    TIM9->CCR1 = 0U; TIM9->CCR2 = 0U;   /* MC 右前 */
+    TIM1->CCR3 = 0U; TIM1->CCR4 = 0U;   /* MB 左后 */
+    TIM12->CCR1 = 0U; TIM12->CCR2 = 0U; /* MD 左前 */
+
+    /*
+     * 仅在正反方向直接互换时保持 1 ms 全零输出。
+     * 当前 PWM 为 2 kHz，1 ms 覆盖两个完整 PWM 周期，确保旧方向脉冲结束。
+     * 从停止启动、同方向调速以及正常巡航都不会进入此延时。
+     */
+    if (direction_changed != 0U) {
+        DelayMs(1U);
+    }
+
+    if (right_speed >= 0.0f) {
+        TIM1->CCR2 = right; /* MA 右后 */
+        TIM9->CCR2 = right; /* MC 右前 */
+    } else {
+        TIM1->CCR1 = right;
+        TIM9->CCR1 = right;
+    }
+
+    if (left_speed >= 0.0f) {
+        TIM1->CCR3 = left;   /* MB 左后 */
+        TIM12->CCR1 = left;  /* MD 左前 */
+    } else {
+        TIM1->CCR4 = left;
+        TIM12->CCR2 = left;
+    }
+
+    left_direction = next_left_direction;
+    right_direction = next_right_direction;
 }
 
-/*
- * 四轮独立PWM入口，供编码器速度PI使用。
- * left_command/right_command记录同侧较大的绝对命令，供堵转保护判断该侧
- * 是否正在受控运行；真正的四路占空比分别写入对应AT8236通道。
- */
-void Motor_SetWheelPercent(int16_t ma_percent, int16_t mb_percent,
-                           int16_t mc_percent, int16_t md_percent)
+void Motor_StopAll(void)
 {
-#if APP_ENABLE_MOTORS
-    ma_percent = clamp_percent(ma_percent);
-    mb_percent = clamp_percent(mb_percent);
-    mc_percent = clamp_percent(mc_percent);
-    md_percent = clamp_percent(md_percent);
-    ma_command = ma_percent;
-    mb_command = mb_percent;
-    mc_command = mc_percent;
-    md_command = md_percent;
-    left_command = (mb_percent >= 0 ? mb_percent : -mb_percent) >=
-                   (md_percent >= 0 ? md_percent : -md_percent) ?
-                   mb_percent : md_percent;
-    right_command = (ma_percent >= 0 ? ma_percent : -ma_percent) >=
-                    (mc_percent >= 0 ? mc_percent : -mc_percent) ?
-                    ma_percent : mc_percent;
-    set_motor_channel(TIM1, &TIM1->CCR1, &TIM1->CCR2,
-                      ma_percent, MOTOR_MA_INVERT);
-    set_motor_channel(TIM1, &TIM1->CCR3, &TIM1->CCR4,
-                      mb_percent, MOTOR_MB_INVERT);
-    set_motor_channel(TIM9, &TIM9->CCR1, &TIM9->CCR2,
-                      mc_percent, MOTOR_MC_INVERT);
-    set_motor_channel(TIM12, &TIM12->CCR1, &TIM12->CCR2,
-                      md_percent, MOTOR_MD_INVERT);
-#else
-    (void)ma_percent;
-    (void)mb_percent;
-    (void)mc_percent;
-    (void)md_percent;
-    left_command = 0;
-    right_command = 0;
-    ma_command = 0;
-    mb_command = 0;
-    mc_command = 0;
-    md_command = 0;
-    Motor_Stop();
-#endif
+    TIM1->CCR1 = 0U; TIM1->CCR2 = 0U;
+    TIM1->CCR3 = 0U; TIM1->CCR4 = 0U;
+    TIM9->CCR1 = 0U; TIM9->CCR2 = 0U;
+    TIM12->CCR1 = 0U; TIM12->CCR2 = 0U;
+    left_duty = 0U;
+    right_duty = 0U;
+    left_direction = 0;
+    right_direction = 0;
 }
 
-/* 普通停车：四个AT8236通道双输入均为低，电机自由减速。 */
-void Motor_Stop(void)
-{
-    left_command = 0;
-    right_command = 0;
-    ma_command = 0;
-    mb_command = 0;
-    mc_command = 0;
-    md_command = 0;
-    TIM1->CCR1 = 0U;
-    TIM1->CCR2 = 0U;
-    TIM1->CCR3 = 0U;
-    TIM1->CCR4 = 0U;
-    TIM9->CCR1 = 0U;
-    TIM9->CCR2 = 0U;
-    TIM12->CCR1 = 0U;
-    TIM12->CCR2 = 0U;
-}
-
-/* 主动短刹车：四个AT8236通道双输入均为高，用于终点快速停车。 */
-void Motor_Brake(void)
-{
-    left_command = 0;
-    right_command = 0;
-#if APP_ENABLE_MOTORS
-    TIM1->CCR1 = TIM1->ARR + 1U;
-    TIM1->CCR2 = TIM1->ARR + 1U;
-    TIM1->CCR3 = TIM1->ARR + 1U;
-    TIM1->CCR4 = TIM1->ARR + 1U;
-    TIM9->CCR1 = TIM9->ARR + 1U;
-    TIM9->CCR2 = TIM9->ARR + 1U;
-    TIM12->CCR1 = TIM12->ARR + 1U;
-    TIM12->CCR2 = TIM12->ARR + 1U;
-#else
-    Motor_Stop();
-#endif
-}
-
-/* 返回当前左侧有效命令；H60实车左侧为MB（左后）和MD（左前）。 */
-int16_t Motor_LeftCommand(void)
-{
-    return left_command;
-}
-
-/* 返回当前右侧有效命令；H60实车右侧为MA（右后）和MC（右前）。 */
-int16_t Motor_RightCommand(void)
-{
-    return right_command;
-}
-
-int16_t Motor_MACommand(void) { return ma_command; }
-int16_t Motor_MBCommand(void) { return mb_command; }
-int16_t Motor_MCCommand(void) { return mc_command; }
-int16_t Motor_MDCommand(void) { return md_command; }
+uint16_t Motor_LeftDuty(void) { return left_duty; }
+uint16_t Motor_RightDuty(void) { return right_duty; }
